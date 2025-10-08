@@ -1,0 +1,61 @@
+<!-- src/main/resources/mappers/UserMapper.xml -->
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="thesis.project.gu.mapper.PlaceMapper">
+
+  <resultMap id="PlaceMap" type="thesis.project.gu.model.Place">
+    <id     property="id"          column="id"/>
+    <result property="name"        column="name"/>
+    <result property="address"     column="address"/>
+    <result property="city"        column="city"/>
+    <result property="district"    column="district"/>
+    <result property="country"     column="country"/>
+    <result property="latitude"    column="latitude"/>
+    <result property="longitude"   column="longitude"/>
+    <result property="source"      column="source"/>
+    <result property="externalRef" column="external_ref"/>
+  </resultMap>
+
+  <select id="findBySourceAndExternalRef" resultMap="PlaceMap">
+    SELECT * FROM place
+    WHERE source = #{source} AND external_ref = #{externalRef}
+    LIMIT 1
+  </select>
+
+  <!-- 单条 UPSERT：依赖唯一键 (source, external_ref) -->
+  <insert id="upsert" parameterType="thesis.project.gu.model.Place">
+    INSERT INTO place
+    (name, address, city, district, country, latitude, longitude, source, external_ref)
+    VALUES
+      (#{name}, #{address}, #{city}, #{district}, #{country}, #{latitude}, #{longitude}, #{source}, #{externalRef})
+    ON DUPLICATE KEY UPDATE
+                       name=VALUES(name),
+                       address=VALUES(address),
+                       city=VALUES(city),
+                       district=VALUES(district),
+                       country=VALUES(country),
+                       latitude=VALUES(latitude),
+                       longitude=VALUES(longitude)
+  </insert>
+
+  <!-- 批量 UPSERT（MySQL 8 OK） -->
+  <insert id="batchUpsert">
+    INSERT INTO place
+    (name, address, city, district, country, latitude, longitude, source, external_ref)
+    VALUES
+    <foreach collection="list" item="p" separator=",">
+      (#{p.name}, #{p.address}, #{p.city}, #{p.district}, #{p.country},
+      #{p.latitude}, #{p.longitude}, #{p.source}, #{p.externalRef})
+    </foreach>
+    ON DUPLICATE KEY UPDATE
+    name=VALUES(name),
+    address=VALUES(address),
+    city=VALUES(city),
+    district=VALUES(district),
+    country=VALUES(country),
+    latitude=VALUES(latitude),
+    longitude=VALUES(longitude)
+  </insert>
+
+</mapper>

@@ -1,0 +1,122 @@
+/* 右上角登录按钮 */
+/* 全屏容器：只是个布局容器，不要白底 */
+/* 1) 修掉背后的灰色大边框：容器/遮罩都不该有圆角 & 阴影 */
+#authModal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: none;
+    background: transparent;   /* 关键：容器透明 */
+    border: none;              /* 避免浏览器默认边框 */
+    box-shadow: none;          /* 不要阴影 */
+}
+#authBackdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 1000;
+    border-radius: 0;          /* 不能圆角 */
+    border: none;
+    box-shadow: none;          /* 不能阴影 */
+    backdrop-filter: none;     /* 如之前尝试过毛玻璃，统一关掉 */
+}
+#btnOpenAuth {
+    background: #fff;
+    border: 1px solid #dadce0;
+    border-radius: 20px;
+    padding: 6px 16px;
+    font-size: 14px;
+    color: #3c4043;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(60,64,67,.3);
+    transition: background-color 0.2s;
+}
+#btnOpenAuth:hover {
+    background-color: #f7f8f8;
+}
+/* 2) 卡片本体才有圆角/阴影 */
+.auth-card {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 360px; max-width: 90%;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.2);
+    z-index: 1001;
+    overflow: hidden;          /* 让顶部边线干净 */
+}
+
+/* 3) 头部 + 关闭按钮布局 */
+.auth-header {
+    position: relative;        /* 让 X 绝对定位到这里 */
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid #e0e0e0;
+    background: #fff;
+}
+.auth-header .tabs {
+    display: inline-flex;
+    gap: 0;
+}
+.auth-header .tab {
+    padding: 10px 16px;
+    font-size: 14px;
+    color: #5f6368;
+    background: #f1f3f4;
+    border: 1px solid #e0e0e0;
+    border-bottom: none;       /* 让激活态无底边 */
+    cursor: pointer;
+}
+.auth-header .tab:first-child { border-top-left-radius: 8px; }
+.auth-header .tab.active {
+    background: #fff;
+    color: #1a73e8;
+    border-bottom: 1px solid #fff; /* 和卡片背景对齐，看起来“凸起” */
+}
+.auth-header .close {
+    position: absolute;
+    right: 8px; top: 8px;      /* ✅ X 放右上 */
+    width: 28px; height: 28px;
+    border: none;
+    background: transparent;
+    color: #5f6368;
+    font-size: 16px;
+    line-height: 28px;
+    border-radius: 50%;
+    cursor: pointer;
+}
+.auth-header .close:hover { background: #f1f3f4; }
+
+/* 4) 表单区域留白 */
+.auth-body { padding: 16px; }
+
+/* 5) 输入框 & 提交按钮微调，接近 GM 风格 */
+.tab-panel input[type="text"],
+.tab-panel input[type="password"],
+.tab-panel input[type="email"],
+.tab-panel input[type="tel"]{
+    width: 100%;
+    padding: 9px 9px;
+    margin: 10px 0;
+    font-size: 14px;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    outline: none;
+}
+.tab-panel input:focus {
+    border-color: #1a73e8;
+    box-shadow: 0 0 0 2px rgba(26,115,232,.15);
+}
+.tab-panel .primary.full {
+    width: 100%;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+}
+.tab-panel .primary.full:hover { background: #1669c1; }
+

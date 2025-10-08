@@ -1,0 +1,21 @@
+package thesis.project.gu;
+
+import org.mybatis.spring.annotation.MapperScan;
+import org.mybatis.spring.annotation.MapperScans;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.cache.annotation.EnableCaching;
+import thesis.project.gu.config.AmapProperties;
+
+@SpringBootApplication
+@EnableConfigurationProperties(AmapProperties.class)
+@MapperScan("thesis.project.gu.mapper")
+@EnableCaching
+public class ThesisProjectApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ThesisProjectApplication.class, args);
+    }
+
+}

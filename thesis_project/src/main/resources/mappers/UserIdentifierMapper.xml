@@ -1,0 +1,30 @@
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="thesis.project.gu.mapper.UserIdentifierMapper">
+
+    <resultMap id="idenMap" type="thesis.project.gu.model.UserIdentifier">
+        <id     column="id"         property="id"/>
+        <result column="user_id"    property="userId"/>
+        <result column="id_type"    property="idType"/>
+        <result column="identifier" property="identifier"/>
+        <result column="is_verified" property="isVerified"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_identifier (user_id, id_type, identifier, is_verified)
+        VALUES (#{userId}, #{idType}, #{identifier}, #{isVerified})
+    </insert>
+
+    <select id="findByTypeAndIdentifier" resultMap="idenMap">
+        SELECT * FROM user_identifier
+        WHERE id_type = #{type} AND identifier = #{identifier}
+        LIMIT 1
+    </select>
+
+    <select id="findByIdentifierAny" resultMap="idenMap">
+        SELECT * FROM user_identifier
+        WHERE identifier = #{identifier}
+        LIMIT 1
+    </select>
+</mapper>

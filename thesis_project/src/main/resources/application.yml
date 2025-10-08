@@ -1,0 +1,46 @@
+server:
+  port: 8080
+
+amap:
+  key: ${AMAP_KEY}
+  base-url: https://api.geoapify.com/v1
+
+
+
+spring:
+  cache:
+    type: redis
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  datasource:
+    url: jdbc:mysql://localhost:3306/thesis_project?useSSL=false&serverTimezone=Asia/Shanghai
+    username: root
+    password: 123456
+
+
+
+  testcontainers:
+    enabled: false
+
+mybatis:
+  # 只让它扫描你的领域模型类
+  type-aliases-package: gu.project.navigator.model
+
+  # 确认你的 XML 目录
+  mapper-locations: classpath*:/mappers/*.xml
+
+  configuration:
+    map-underscore-to-camel-case: true
+
+
+logging:
+  level:
+    # 也可以打开整个包的调试日志
+    org.mybatis: DEBUG
+    org.springframework.boot.autoconfigure: DEBUG
+    thesis.project.gu: debug
+
+
+

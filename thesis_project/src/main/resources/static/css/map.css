@@ -1,0 +1,130 @@
+/* style.css */
+/* style.css */
+/* 基础重置 */
+/* 页面与地图区域 */
+html, body { height:100%; margin:0; }
+#map {
+    position:absolute; top:0; right:0; bottom:0; left:80px; /* 配合 80px 侧栏 */
+}
+
+/* 侧边栏（80px） */
+#sidebar {
+    position:absolute; top:0; left:0; width:80px; height:100%;
+    background:#fff; box-shadow:2px 0 5px rgba(0,0,0,.08); z-index:1000;
+    font-family:Arial, sans-serif;
+}
+.sidebar-header { padding:14px; font-weight:bold; border-bottom:1px solid #eee; text-align:center; }
+.sidebar-menu { list-style:none; margin:0; padding:6px 0; }
+.sidebar-menu li { padding:12px 10px; text-align:center; cursor:pointer; }
+.sidebar-menu li.active, .sidebar-menu li:hover { background:#f4f4f4; }
+
+/* 左侧路线面板 */
+#directions{
+    position:absolute; top:0; left:80px; width:360px; height:100%;
+    background:#fff; box-shadow:2px 0 12px rgba(0,0,0,.15); z-index:1001;
+    display:flex; flex-direction:column;
+}
+
+/* 出行方式 tabs */
+.modes{ display:flex; gap:8px; padding:12px; border-bottom:1px solid #eee; }
+.mode{
+    width:40px; height:36px; border:1px solid #ddd; border-radius:8px;
+    background:#fff; cursor:pointer; font-size:18px;
+}
+.mode.active{ border-color:#4285f4; background:#e8f0fe; }
+
+/* 输入区 */
+.inputs{ padding:12px; border-bottom:1px solid #eee; }
+.field{ position:relative; display:flex; align-items:center; margin-bottom:8px; }
+.field input{
+    flex:1; padding:8px 10px; border:1px solid #ccc; border-radius:8px;
+}
+.suggest-btn{
+    margin-left:6px; width:36px; height:34px; border:1px solid #ddd;
+    background:#fff; border-radius:8px; cursor:pointer;
+}
+.primary{
+    width:100%; padding:10px; border:none; background:#4285f4; color:#fff;
+    border-radius:8px; font-size:14px; cursor:pointer;
+}
+
+/* 候选下拉列表 */
+.suggest-list{
+    position:absolute; top:40px; left:0; right:42px; max-height:200px; overflow:auto;
+    background:#fff; border:1px solid #ddd; border-radius:8px; display:none; z-index:10;
+}
+.suggest-list .item{ padding:8px 10px; cursor:pointer; }
+.suggest-list .item:hover{ background:#f6f6f6; }
+
+/* 摘要卡片 */
+.summary[hidden], .steps[hidden] { display: none !important; }
+.summary{ padding:10px 12px; border-bottom:1px solid #eee; }
+#directions { background: transparent; }                 /* 全部透明 */
+#directions .inputs { background: #fff; border-radius:12px; } /* 只给输入块白底（可选） */
+.summary .title{ font-weight:bold; margin-bottom:6px; }
+.cards{ display:flex; flex-direction:column; gap:6px; }
+.card{
+    background:#f7f9fb; border:1px solid #e6eef7; border-radius:8px;
+    padding:8px 10px; font-size:14px;
+}
+
+/* 步骤列表 */
+.steps{
+    max-height: 42vh;
+    overflow: auto;
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 10px;
+    margin: 6px 0;
+    box-shadow: 0 4px 12px rgba(0,0,0,.1);
+    line-height: 1.4;
+    padding:12px;
+    flex:1; }
+.steps { min-height: 0; }
+.step{
+    border-bottom:1px solid #f0f0f0; padding:10px 0; font-size:14px;
+}
+.step small{ color:#666; }
+
+
+
+
+.drawer{
+    position:absolute; top:0; left:80px; width:360px; height:100%;
+    background:#fff; box-shadow:2px 0 12px rgba(0,0,0,.15); z-index:1002;
+    display:flex; flex-direction:column;
+}
+.drawer-header{ display:flex; align-items:center; gap:8px; padding:12px; border-bottom:1px solid #eee; }
+.drawer-header .title{ font-weight:700; font-size:16px; flex:1; }
+
+.icon-btn{ border:none; background:transparent; cursor:pointer; font-size:16px; padding:6px 8px; }
+.primary.small{ padding:6px 10px; font-size:12px; }
+.danger.small{ padding:6px 10px; font-size:12px; background:#e53935; color:#fff; border:none; border-radius:6px; }
+.secondary{ padding:6px 10px; border:1px solid #ddd; background:#fff; border-radius:8px; cursor:pointer; }
+
+.list-group{ padding:10px 12px; overflow:auto; }
+.list-item{
+    border:1px solid #eee; border-radius:10px; padding:10px; margin-bottom:10px; display:flex; gap:10px; align-items:center;
+}
+.list-item .grow{ flex:1; }
+.list-item .title{ font-weight:600; }
+.list-item .subtitle{ color:#666; font-size:12px; margin-top:2px; }
+
+.subheader{ display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid #f1f1f1; }
+.list-meta{ padding:10px 12px; border-bottom:1px solid #f1f1f1; }
+.inline-input{ width:100%; padding:8px; border:1px solid #ddd; border-radius:8px; margin-bottom:8px; }
+.inline-textarea{ width:100%; min-height:60px; padding:8px; border:1px solid #ddd; border-radius:8px; }
+
+.row{ display:flex; align-items:center; gap:8px; }
+.row.right{ justify-content:flex-end; }
+.grow{ flex:1; }
+.link{ background:none; border:none; color:#1a73e8; cursor:pointer; }
+
+/* Modal */
+.modal{ position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(0,0,0,.25); display:flex; align-items:center; justify-content:center; z-index:1100; }
+.modal-card{ width:420px; background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 10px 30px rgba(0,0,0,.2); }
+.modal-header{ display:flex; justify-content:space-between; align-items:center; padding:12px 14px; border-bottom:1px solid #eee; font-weight:600; }
+.modal-body{ padding:12px 14px; }
+.modal-body input, .modal-body textarea, .modal-body select{ width:100%; padding:8px; border:1px solid #ddd; border-radius:8px; margin:6px 0 12px; }
+.modal-footer{ padding:12px 14px; display:flex; justify-content:flex-end; gap:10px; }

@@ -1,0 +1,8 @@
+package thesis.project.gu.req;
+
+import jakarta.validation.constraints.NotBlank;
+
+public record LoginReq(
+        @NotBlank String login,
+        @NotBlank String password
+) {}

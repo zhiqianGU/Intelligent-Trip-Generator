@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE generatorConfiguration
+        PUBLIC "-//mybatis.org//DTD MyBatis Generator Configuration 1.0//EN"
+        "http://mybatis.org/dtd/mybatis-generator-config_1_0.dtd">
+
+<generatorConfiguration>
+    <context id="navigator" targetRuntime="MyBatis3">
+
+        <!-- 1. 注释生成器 -->
+        <commentGenerator>
+            <property name="suppressDate" value="false"/>
+            <property name="suppressAllComments" value="true"/>
+        </commentGenerator>
+
+        <!-- 2. 数据库连接：指向你的 navigator 库 -->
+        <jdbcConnection
+                driverClass="com.mysql.cj.jdbc.Driver"
+                connectionURL="jdbc:mysql://localhost:3306/thesis_project"
+                userId="root"
+                password="123456"/>
+
+        <!-- 3. 生成的 Model 放到你的 model 包 -->
+        <javaModelGenerator
+                targetPackage="thesis.project.gu.model"
+                targetProject="src/main/java">
+            <property name="enableSubPackages" value="true"/>
+            <property name="trimStrings"      value="true"/>
+        </javaModelGenerator>
+
+        <!-- 4. 生成的 XML Mapper 放到 resources/mappers -->
+        <sqlMapGenerator
+                targetPackage="mappers"
+                targetProject="src/main/resources">
+            <property name="enableSubPackages" value="true"/>
+        </sqlMapGenerator>
+
+        <!-- 5. 生成的 Mapper 接口放到 dao 包 -->
+        <javaClientGenerator
+                targetPackage="thesis.project.gu.mapper"
+                targetProject="src/main/java"
+                type="XMLMAPPER">
+            <property name="enableSubPackages" value="true"/>
+        </javaClientGenerator>
+
+        <!-- 6. 按需为表生成映射 （举例 users 表） -->
+        <table tableName="users" domainObjectName="User">
+            <!-- 可在这里定制列/主键/枚举等 -->
+        </table>
+
+        <!-- 如果还有其他表，继续添加 <table> 节点 -->
+    </context>
+</generatorConfiguration>
