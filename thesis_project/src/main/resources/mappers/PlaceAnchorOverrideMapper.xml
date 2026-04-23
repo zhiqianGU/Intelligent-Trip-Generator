@@ -1,0 +1,35 @@
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="thesis.project.gu.mapper.PlaceAnchorOverrideMapper">
+
+    <resultMap id="PlaceAnchorOverrideMap" type="thesis.project.gu.model.PlaceAnchorOverride">
+        <id property="id" column="id"/>
+        <result property="matchName" column="match_name"/>
+        <result property="matchCity" column="match_city"/>
+        <result property="matchCountry" column="match_country"/>
+        <result property="latitude" column="latitude"/>
+        <result property="longitude" column="longitude"/>
+        <result property="displayName" column="display_name"/>
+        <result property="note" column="note"/>
+        <result property="enabled" column="enabled"/>
+    </resultMap>
+
+    <select id="findEnabledMatch" resultMap="PlaceAnchorOverrideMap">
+        SELECT *
+        FROM place_anchor_override
+        WHERE enabled = TRUE
+          AND LOWER(TRIM(match_name)) = LOWER(TRIM(#{name}))
+          AND (
+            match_city IS NULL OR match_city = '' OR LOWER(TRIM(match_city)) = LOWER(TRIM(#{city}))
+          )
+          AND (
+            match_country IS NULL OR match_country = '' OR LOWER(TRIM(match_country)) = LOWER(TRIM(#{country}))
+          )
+        ORDER BY
+          CASE WHEN match_city IS NULL OR match_city = '' THEN 1 ELSE 0 END,
+          CASE WHEN match_country IS NULL OR match_country = '' THEN 1 ELSE 0 END,
+          id DESC
+        LIMIT 1
+    </select>
+</mapper>

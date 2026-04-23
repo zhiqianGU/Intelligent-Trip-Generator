@@ -1,0 +1,176 @@
+﻿<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Google 地图 Demo</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" crossorigin="">
+    <link rel="stylesheet" href="/css/map.css?v=2025-08-09-04"/>
+    <link rel="stylesheet" href="/css/auth.css?v=2025-08-09-09"/>
+</head>
+<body>
+<!-- 左侧 80px 侧边栏 -->
+<div id="sidebar">
+    <div class="sidebar-header">我的</div>
+    <ul class="sidebar-menu">
+        <li id="menu-recent">最近</li>
+    </ul>
+</div>
+
+<!-- 地图 -->
+<div id="map"></div>
+
+<!-- 顶部右侧：账户/用户 -->
+<div id="account-bar" style="position:fixed;top:16px;right:16px;z-index:1001;display:flex;gap:8px;align-items:center;">
+    <!-- 未登录：显示 登录/注册 按钮 -->
+    <button id="btnOpenAuth" class="account-btn logged-out">登录 / 注册</button>
+
+    <!-- 已登录：显示头像 + 下拉菜单 -->
+    <div id="userMenu" class="user-menu logged-in" style="display:none;position:relative;">
+        <div class="user-chip" id="userChip" title="账户">
+            <span id="userInitial">U</span>
+        </div>
+        <div class="user-dropdown" id="userDropdown" style="display:none;">
+            <div class="user-info" style="padding:8px 16px;">
+                <div id="userName" style="font-weight:600;">未命名</div>
+                <div id="userEmail" class="muted" style="font-size:12px;color:#5f6368;"></div>
+            </div>
+            <hr/>
+            <button class="menu-item" id="gotoRecent">最近</button>
+            <hr/>
+            <button class="menu-item danger" id="btnLogout">退出登录</button>
+        </div>
+    </div>
+</div>
+
+<!-- 左侧“路线面板” -->
+<div id="directions">
+    <div id="planRoutesPanel" class="plan-routes">
+        <div class="plan-routes-head">
+            <div>
+                <div class="title">Trip Plan Routes</div>
+                <div id="planRoutesHint" class="muted">Load the latest generated plan and display each day as separate route segments.</div>
+            </div>
+            <div class="plan-routes-actions">
+                <button id="btnTogglePlanDebug" class="secondary" type="button" hidden>Show Debug</button>
+                <button id="btnLoadPlanRoutes" class="secondary">Load Latest Plan</button>
+            </div>
+        </div>
+        <div class="plan-day-switch">
+            <button id="planPrevDay" class="secondary small-inline" type="button">Prev</button>
+            <select id="planDaySelect"></select>
+            <button id="planNextDay" class="secondary small-inline" type="button">Next</button>
+        </div>
+        <div id="planDayStatus" class="map-plan-error" style="display:none;"></div>
+        <div id="planSegments" class="plan-segments">
+            <div class="muted">No plan loaded</div>
+        </div>
+    </div>
+
+    <div id="steps" class="steps" hidden></div>
+</div>
+
+<!-- Hidden legacy route controls kept for app.js compatibility. -->
+<div hidden>
+    <input id="origin"/>
+    <div id="origin-suggest"></div>
+    <input id="destination"/>
+    <div id="dest-suggest"></div>
+    <input id="city"/>
+    <button id="btnGo" type="button"></button>
+    <div id="summary">
+        <div class="title"></div>
+        <div id="carCard"><b id="carTime"></b><span id="carDist"></span></div>
+        <div id="transitCard"><b id="transitTime"></b><span id="transitDist"></span></div>
+        <div id="walkCard"><b id="walkTime"></b><span id="walkDist"></span></div>
+    </div>
+</div>
+
+<!-- Authentication modal -->
+<div id="authModal" class="auth-modal" style="display:none;">
+    <div class="auth-backdrop" id="authBackdrop"></div>
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="tabs">
+                <button class="tab active" data-tab="login">Log In</button>
+                <button class="tab" data-tab="register">Register</button>
+            </div>
+            <button class="close" id="authClose">×</button>
+        </div>
+
+        <div class="auth-body">
+            <!-- Login -->
+            <form id="loginForm" class="tab-panel" data-panel="login">
+                <label>Account (Username / Email / Phone)</label>
+                <input id="loginId" type="text" autocomplete="username" required/>
+                <label>Password</label>
+                <input id="loginPassword" type="password" autocomplete="current-password" required/>
+                <div class="row space-between">
+                    <label class="checkbox"><input id="rememberMe" type="checkbox"/> Remember me</label>
+                    <a class="link muted" id="forgotPwd" href="javascript:void(0)">Forgot password?</a>
+                </div>
+                <div id="loginChallengeBox" class="challenge-box" style="display:none;">
+                    <label for="loginChallengeAnswer">Verification</label>
+                    <div class="challenge-row">
+                        <span id="loginChallengeQuestion" class="challenge-question"></span>
+                        <button id="loginChallengeRefresh" type="button" class="challenge-refresh">Refresh</button>
+                    </div>
+                    <input id="loginChallengeId" type="hidden"/>
+                    <input id="loginChallengeAnswer" type="text" inputmode="numeric" autocomplete="off" placeholder="Answer"/>
+                </div>
+                <button type="submit" class="primary full">Log In</button>
+            </form>
+
+            <!-- Register -->
+            <form id="registerForm" class="tab-panel" data-panel="register" style="display:none;">
+                <label>Email (fill in at least one of email or phone)</label>
+                <input id="regEmail" type="email" autocomplete="email" placeholder="Optional"/>
+                <label>Phone Number</label>
+                <input id="regPhone" type="tel" autocomplete="tel" placeholder="Optional"/>
+                <label>Password</label>
+                <input id="regPassword" type="password" autocomplete="new-password" required/>
+                <label>Username (optional)</label>
+                <input id="regUsername" type="text" placeholder="You can set this later"/>
+                <div id="registerChallengeBox" class="challenge-box">
+                    <label for="registerChallengeAnswer">Verification</label>
+                    <div class="challenge-row">
+                        <span id="registerChallengeQuestion" class="challenge-question"></span>
+                        <button id="registerChallengeRefresh" type="button" class="challenge-refresh">Refresh</button>
+                    </div>
+                    <input id="registerChallengeId" type="hidden"/>
+                    <input id="registerChallengeAnswer" type="text" inputmode="numeric" autocomplete="off" placeholder="Answer" required/>
+                </div>
+                <button type="submit" class="primary full">Register</button>
+            </form>
+        </div>
+
+        <div class="auth-footer muted">
+            After logging in, You can view your past plans and your favorite plans.
+        </div>
+    </div>
+</div>
+
+<div id="walkConfirmModal" class="modal" style="display:none;">
+    <div class="modal-card">
+        <div class="modal-header">
+            <div>Long Walk</div>
+            <button class="icon-btn" id="closeWalkConfirm">×</button>
+        </div>
+        <div class="modal-body">
+            <div id="walkConfirmMessage">Walking time is too long (>30min). Continue to view?</div>
+        </div>
+        <div class="modal-footer">
+            <button id="cancelWalkConfirm" class="secondary" type="button">Cancel</button>
+            <button id="confirmWalkConfirm" class="primary" type="button">Continue</button>
+        </div>
+    </div>
+</div>
+
+<!-- Leaflet -->
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js" crossorigin=""></script>
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+<script src="/js/axios-setup.js"></script>
+<script src="/js/app.js?v=2026-04-10-03"></script>
+<script src="/js/auth.js?v=2026-04-20-02"></script>
+</body>
+</html>

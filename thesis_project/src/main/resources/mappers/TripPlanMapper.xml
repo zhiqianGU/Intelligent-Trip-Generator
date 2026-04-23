@@ -1,0 +1,130 @@
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="thesis.project.gu.mapper.TripPlanMapper">
+    <insert id="insertPlan" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO trip_plan(user_id, title, city, days, budget_cents, party_adults, party_kids, pace, departure_date)
+        VALUES (#{userId}, #{title}, #{city}, #{days}, #{budgetCents}, #{partyAdults}, #{partyKids}, #{pace}, #{departureDate})
+    </insert>
+
+    <select id="selectStyleIdByCode" parameterType="string" resultType="int">
+        SELECT id FROM style_tag WHERE code = #{code}
+    </select>
+
+    <insert id="insertPlanStyle">
+        INSERT IGNORE INTO trip_plan_style(plan_id, style_id)
+        VALUES (#{planId}, #{styleId})
+    </insert>
+
+    <insert id="insertDay" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO trip_day(plan_id, day_index, hotel_place_id, note, hotel_reason, hotel_tip)
+        VALUES (#{planId}, #{dayIndex}, #{hotelPlaceId}, #{note}, #{hotelReason}, #{hotelTip})
+    </insert>
+
+    <update id="updateDayHotel">
+        UPDATE trip_day SET hotel_place_id = #{hotelPlaceId} WHERE id = #{dayId}
+    </update>
+    <update id="updateFavorite">
+        UPDATE trip_plan
+        SET favorite = #{favorite}
+        WHERE id = #{planId}
+          AND user_id = #{userId}
+    </update>
+    <update id="updateTitle">
+        UPDATE trip_plan
+        SET title = #{title}
+        WHERE id = #{planId}
+          AND user_id = #{userId}
+    </update>
+
+    <delete id="deletePlan">
+        DELETE FROM trip_plan
+        WHERE id = #{planId}
+          AND user_id = #{userId}
+    </delete>
+
+    <insert id="insertDayStop" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO trip_day_stop(day_id, seq, place_id, dwell_minutes, note, category, time_slot, start_time, end_time, reason, tip)
+        VALUES (#{dayId}, #{seq}, #{placeId}, #{dwellMinutes}, #{note}, #{category}, #{timeSlot}, #{startTime}, #{endTime}, #{reason}, #{tip})
+    </insert>
+
+    <resultMap id="planSummaryMap" type="thesis.project.gu.model.TripPlanSummary">
+        <id    property="id"         column="id"/>
+        <result property="title"     column="title"/>
+        <result property="city"      column="city"/>
+        <result property="days"      column="days"/>
+        <result property="favorite"  column="favorite"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <select id="listByUser" resultMap="planSummaryMap">
+        SELECT id,title,city,days,favorite,created_at
+        FROM trip_plan
+        WHERE user_id = #{userId}
+        <if test="favorite != null">
+            AND favorite = #{favorite}
+        </if>
+        ORDER BY created_at DESC, id DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countByUser" resultType="int">
+        SELECT COUNT(1)
+        FROM trip_plan
+        WHERE user_id = #{userId}
+        <if test="favorite != null">
+            AND favorite = #{favorite}
+        </if>
+    </select>
+
+    <select id="findPlanById" >
+        SELECT id,title,city,days,favorite,created_at,budget_cents,party_adults,party_kids,pace,departure_date
+        FROM trip_plan
+        WHERE id = #{planId} AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <select id="findDaysByPlan" resultType="thesis.project.gu.model.TripDayView">
+        SELECT id, day_index AS dayIndex, hotel_place_id AS hotelPlaceId, note,
+               hotel_reason AS hotelReason, hotel_tip AS hotelTip
+        FROM trip_day
+        WHERE plan_id = #{planId}
+        ORDER BY day_index ASC
+    </select>
+
+    <select id="findStopsByDayIds" resultType="thesis.project.gu.model.TripStopView">
+        SELECT id, day_id AS dayId, seq, place_id AS placeId, dwell_minutes AS dwellMinutes, note,
+               category,
+               time_slot AS timeSlot, start_time AS startTime, end_time AS endTime,
+               reason, tip
+        FROM trip_day_stop
+        WHERE day_id IN
+        <foreach collection="dayIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+        ORDER BY day_id, seq
+    </select>
+    <select id="findPlacesByIds" resultType="thesis.project.gu.response.PlaceDetail">
+        select
+        id,
+        name,
+        address as addressLine,
+        city,
+        district,
+        country,
+        latitude,
+        longitude,
+        external_ref,
+        website_uri AS websiteUri,
+        google_maps_uri AS googleMapsUri,
+        business_status AS businessStatus
+        from place
+        where id in
+        <foreach collection="placeIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+
+    </select>
+
+
+</mapper>

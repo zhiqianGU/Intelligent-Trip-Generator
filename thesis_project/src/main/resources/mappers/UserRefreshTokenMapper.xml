@@ -1,0 +1,66 @@
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="thesis.project.gu.mapper.UserRefreshTokenMapper">
+
+    <resultMap id="refreshTokenMap" type="thesis.project.gu.dto.UserRefreshToken">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="token_hash" property="tokenHash"/>
+        <result column="expires_at" property="expiresAt"/>
+        <result column="revoked_at" property="revokedAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="replaced_by_token_id" property="replacedByTokenId"/>
+        <result column="device_info" property="deviceInfo"/>
+        <result column="ip_address" property="ipAddress"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_refresh_token (
+            user_id,
+            token_hash,
+            expires_at,
+            revoked_at,
+            created_at,
+            replaced_by_token_id,
+            device_info,
+            ip_address
+        ) VALUES (
+            #{userId},
+            #{tokenHash},
+            #{expiresAt},
+            #{revokedAt},
+            #{createdAt},
+            #{replacedByTokenId},
+            #{deviceInfo},
+            #{ipAddress}
+        )
+    </insert>
+
+    <select id="findActiveByTokenHash" resultMap="refreshTokenMap">
+        SELECT *
+        FROM user_refresh_token
+        WHERE token_hash = #{tokenHash}
+          AND revoked_at IS NULL
+          AND expires_at > CURRENT_TIMESTAMP
+        LIMIT 1
+    </select>
+
+    <update id="revokeById">
+        UPDATE user_refresh_token
+        SET revoked_at = #{revokedAt}
+        WHERE id = #{id}
+    </update>
+
+    <update id="revokeAllByUserId">
+        UPDATE user_refresh_token
+        SET revoked_at = #{revokedAt}
+        WHERE user_id = #{userId}
+          AND revoked_at IS NULL
+    </update>
+
+    <update id="updateReplacedByTokenId">
+        UPDATE user_refresh_token
+        SET replaced_by_token_id = #{replacedByTokenId}
+        WHERE id = #{id}
+    </update>
+</mapper>

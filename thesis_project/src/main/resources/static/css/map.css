@@ -1,31 +1,43 @@
+﻿/* style.css */
 /* style.css */
-/* style.css */
-/* 基础重置 */
-/* 页面与地图区域 */
+/* 鍩虹閲嶇疆 */
+/* 椤甸潰涓庡湴鍥惧尯鍩?*/
 html, body { height:100%; margin:0; }
 #map {
-    position:absolute; top:0; right:0; bottom:0; left:80px; /* 配合 80px 侧栏 */
+    position:absolute; top:0; right:0; bottom:0; left:0;
 }
 
-/* 侧边栏（80px） */
+/* 渚ц竟鏍忥紙80px锛?*/
 #sidebar {
-    position:absolute; top:0; left:0; width:80px; height:100%;
-    background:#fff; box-shadow:2px 0 5px rgba(0,0,0,.08); z-index:1000;
+    position:absolute;
+    top:16px;
+    left:16px;
+    width:320px;
+    height:auto;
+    max-height:calc(100% - 32px);
+    background:rgba(255,255,255,.96);
+    box-shadow:2px 0 12px rgba(0,0,0,.15);
+    z-index:1002;
     font-family:Arial, sans-serif;
+    border-radius:18px;
+    overflow:auto;
+    display:block;
 }
 .sidebar-header { padding:14px; font-weight:bold; border-bottom:1px solid #eee; text-align:center; }
 .sidebar-menu { list-style:none; margin:0; padding:6px 0; }
 .sidebar-menu li { padding:12px 10px; text-align:center; cursor:pointer; }
 .sidebar-menu li.active, .sidebar-menu li:hover { background:#f4f4f4; }
 
-/* 左侧路线面板 */
+/* 宸︿晶璺嚎闈㈡澘 */
 #directions{
-    position:absolute; top:0; left:80px; width:360px; height:100%;
-    background:#fff; box-shadow:2px 0 12px rgba(0,0,0,.15); z-index:1001;
-    display:flex; flex-direction:column;
+    position:absolute; top:0; left:0; width:0; height:0;
+    background:transparent; box-shadow:none; z-index:1001;
+    border-radius:0;
+    overflow:visible;
+    display:block;
 }
 
-/* 出行方式 tabs */
+/* 鍑鸿鏂瑰紡 tabs */
 .modes{ display:flex; gap:8px; padding:12px; border-bottom:1px solid #eee; }
 .mode{
     width:40px; height:36px; border:1px solid #ddd; border-radius:8px;
@@ -33,7 +45,7 @@ html, body { height:100%; margin:0; }
 }
 .mode.active{ border-color:#4285f4; background:#e8f0fe; }
 
-/* 输入区 */
+/* 杈撳叆鍖?*/
 .inputs{ padding:12px; border-bottom:1px solid #eee; }
 .field{ position:relative; display:flex; align-items:center; margin-bottom:8px; }
 .field input{
@@ -48,7 +60,7 @@ html, body { height:100%; margin:0; }
     border-radius:8px; font-size:14px; cursor:pointer;
 }
 
-/* 候选下拉列表 */
+/* 鍊欓€変笅鎷夊垪琛?*/
 .suggest-list{
     position:absolute; top:40px; left:0; right:42px; max-height:200px; overflow:auto;
     background:#fff; border:1px solid #ddd; border-radius:8px; display:none; z-index:10;
@@ -56,11 +68,10 @@ html, body { height:100%; margin:0; }
 .suggest-list .item{ padding:8px 10px; cursor:pointer; }
 .suggest-list .item:hover{ background:#f6f6f6; }
 
-/* 摘要卡片 */
+/* 鎽樿鍗＄墖 */
 .summary[hidden], .steps[hidden] { display: none !important; }
 .summary{ padding:10px 12px; border-bottom:1px solid #eee; }
-#directions { background: transparent; }                 /* 全部透明 */
-#directions .inputs { background: #fff; border-radius:12px; } /* 只给输入块白底（可选） */
+#directions .inputs { background: #fff; border-radius:12px; } /* 鍙粰杈撳叆鍧楃櫧搴曪紙鍙€夛級 */
 .summary .title{ font-weight:bold; margin-bottom:6px; }
 .cards{ display:flex; flex-direction:column; gap:6px; }
 .card{
@@ -68,20 +79,271 @@ html, body { height:100%; margin:0; }
     padding:8px 10px; font-size:14px;
 }
 
-/* 步骤列表 */
+.plan-routes{
+    position:fixed;
+    top:16px;
+    right:16px;
+    width:360px;
+    max-height:calc(100vh - 420px);
+    overflow:auto;
+    margin: 0;
+    padding: 12px;
+    background: rgba(255,255,255,.94);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.1);
+    z-index:1004;
+}
+.plan-routes-head{
+    display:flex;
+    gap:10px;
+    align-items:flex-start;
+    justify-content:space-between;
+    margin-bottom:10px;
+}
+.plan-routes .title{
+    font-weight:700;
+    margin-bottom:4px;
+}
+.plan-routes .muted{
+    color:#6b7280;
+    font-size:12px;
+    line-height:1.4;
+}
+.plan-day-switch{
+    display:flex;
+    gap:8px;
+    margin-bottom:10px;
+    position:fixed;
+    top:16px;
+    left:50%;
+    transform:translateX(-50%);
+    z-index:1010;
+    padding:8px 10px;
+    background:rgba(255,255,255,.96);
+    border:1px solid #e5e7eb;
+    border-radius:999px;
+    box-shadow:0 8px 22px rgba(0,0,0,.12);
+}
+.plan-routes-actions{
+    display:flex;
+    gap:8px;
+    align-items:center;
+}
+.plan-day-switch select{
+    flex:1;
+    min-width:180px;
+    padding:8px 10px;
+    border:1px solid #d1d5db;
+    border-radius:999px;
+    background:#fff;
+}
+.small-inline{
+    width:auto;
+    padding:8px 14px;
+    border-radius:999px;
+}
+.plan-segments{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    max-height:220px;
+    overflow:auto;
+}
+.plan-segment{
+    border:1px solid #e5e7eb;
+    border-radius:10px;
+    padding:10px;
+    background:#fff;
+    cursor:pointer;
+}
+.plan-segment-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:8px;
+}
+.plan-segment.active{
+    border-color:#1a73e8;
+    background:#eef5ff;
+}
+.plan-segment-title{
+    font-weight:600;
+    margin-bottom:4px;
+}
+.plan-segment-mode{
+    color:#475569;
+    font-weight:500;
+    font-size:12px;
+}
+.plan-segment-action{
+    border:1px solid #cbd5e1;
+    background:#fff;
+    color:#0f172a;
+    border-radius:999px;
+    padding:4px 10px;
+    font-size:12px;
+    cursor:pointer;
+    white-space:nowrap;
+}
+.plan-segment-action:hover{
+    border-color:#1a73e8;
+    color:#1a73e8;
+}
+.plan-segment-meta{
+    color:#6b7280;
+    font-size:12px;
+}
+
+.map-sidebar{
+    padding:16px;
+}
+.map-sidebar-section{
+    margin-bottom:18px;
+}
+.map-sidebar-section-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    margin-bottom:10px;
+}
+.map-sidebar-section.collapsed{
+    margin-bottom:6px;
+}
+.map-sidebar-section:empty{
+    display:none;
+    margin:0;
+}
+.map-sidebar-title{
+    font-size:14px;
+    font-weight:700;
+    margin-bottom:0;
+}
+.map-generate-plan-btn{
+    width:auto;
+    padding:6px 10px;
+    border-radius:999px;
+    font-size:12px;
+    white-space:nowrap;
+}
+.map-user-card{
+    padding:12px;
+    border:1px solid #e5e7eb;
+    border-radius:14px;
+    background:#fff;
+}
+.map-user-name{
+    font-weight:700;
+    margin-bottom:4px;
+}
+.map-user-meta{
+    color:#6b7280;
+    font-size:12px;
+}
+.map-sidebar-actions{
+    display:flex;
+    gap:8px;
+    margin-top:12px;
+}
+.map-plan-tabs{
+    display:flex;
+    gap:8px;
+    margin-bottom:10px;
+}
+.map-sidebar-section.collapsed .map-plan-tabs{
+    margin-bottom:0;
+}
+.map-sidebar-section #mapPlanViewerBody.collapsed{
+    display:none;
+}
+.map-plan-tab{
+    border:1px solid #d1d5db;
+    background:#fff;
+    border-radius:999px;
+    padding:8px 12px;
+    cursor:pointer;
+}
+.map-plan-tab.active{
+    border-color:#1a73e8;
+    color:#1a73e8;
+    background:#eef5ff;
+}
+.map-plan-list{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    margin-top:10px;
+}
+.map-plan-item{
+    border:1px solid #e5e7eb;
+    border-radius:12px;
+    background:#fff;
+    padding:10px 12px;
+    cursor:pointer;
+}
+.map-plan-item.active{
+    border-color:#1a73e8;
+    background:#eef5ff;
+}
+.map-plan-item-title{
+    font-weight:600;
+    margin-bottom:4px;
+}
+.map-plan-item-meta{
+    color:#6b7280;
+    font-size:12px;
+}
+.map-plan-empty{
+    color:#6b7280;
+    font-size:13px;
+    padding:8px 2px;
+}
+.map-current-plan{
+    color:#111827;
+    font-size:13px;
+    font-weight:600;
+    padding:6px 2px 10px;
+}
+.map-plan-error{
+    color:#b91c1c;
+    font-size:12px;
+    margin-top:8px;
+    white-space:pre-wrap;
+}
+.map-plan-debug{
+    color:#334155;
+    font-size:11px;
+    line-height:1.45;
+    margin:8px 0 10px;
+    padding:10px;
+    background:#f8fafc;
+    border:1px solid #dbe4f0;
+    border-radius:10px;
+    white-space:pre-wrap;
+    max-height:180px;
+    overflow:auto;
+}
+
+/* 姝ラ鍒楄〃 */
 .steps{
-    max-height: 42vh;
-    overflow: auto;
+    position:fixed;
+    top:340px;
+    right:16px;
+    width:360px;
+    max-height:calc(100vh - 356px);
+    overflow:auto;
     background: rgba(255, 255, 255, 0.92);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
-    border-radius: 10px;
-    margin: 6px 0;
+    border-radius: 16px;
+    margin: 0;
     box-shadow: 0 4px 12px rgba(0,0,0,.1);
     line-height: 1.4;
     padding:12px;
-    flex:1; }
-.steps { min-height: 0; }
+    z-index:1003;
+}
 .step{
     border-bottom:1px solid #f0f0f0; padding:10px 0; font-size:14px;
 }

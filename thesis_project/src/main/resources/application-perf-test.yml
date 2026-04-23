@@ -1,0 +1,12 @@
+app:
+  ai:
+    mock-enabled: true
+    mock-polish-enabled: false
+    mock-raw-path: classpath:perf/mock-draft-raw.json
+    mock-retry-raw-path: classpath:perf/mock-draft-retry-raw.json
+
+google:
+  geocoding:
+    enabled: false
+  places:
+    enabled: false

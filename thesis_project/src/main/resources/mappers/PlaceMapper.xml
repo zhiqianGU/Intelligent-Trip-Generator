@@ -15,6 +15,9 @@
     <result property="longitude"   column="longitude"/>
     <result property="source"      column="source"/>
     <result property="externalRef" column="external_ref"/>
+    <result property="websiteUri" column="website_uri"/>
+    <result property="googleMapsUri" column="google_maps_uri"/>
+    <result property="businessStatus" column="business_status"/>
   </resultMap>
 
   <select id="findBySourceAndExternalRef" resultMap="PlaceMap">
@@ -23,30 +26,93 @@
     LIMIT 1
   </select>
 
+  <select id="findCachedGeocodeMatches" resultMap="PlaceMap">
+    SELECT *
+    FROM place
+    WHERE latitude IS NOT NULL
+      AND longitude IS NOT NULL
+      AND (
+        LOWER(TRIM(name)) = LOWER(TRIM(#{query}))
+        OR LOWER(TRIM(address)) = LOWER(TRIM(#{query}))
+      )
+      <if test="city != null and city != ''">
+        AND (
+          city IS NULL
+          OR LOWER(TRIM(city)) = LOWER(TRIM(#{city}))
+        )
+      </if>
+    ORDER BY
+      CASE WHEN LOWER(TRIM(address)) = LOWER(TRIM(#{query})) THEN 0 ELSE 1 END,
+      CASE WHEN city IS NULL THEN 1 ELSE 0 END,
+      id DESC
+  </select>
+
+  <select id="findGeocodeBackfillTargets" resultMap="PlaceMap">
+    SELECT *
+    FROM place
+    WHERE (
+      LOWER(TRIM(name)) = LOWER(TRIM(#{query}))
+      OR LOWER(TRIM(address)) = LOWER(TRIM(#{query}))
+    )
+    <if test="city != null and city != ''">
+      AND (
+        city IS NULL
+        OR LOWER(TRIM(city)) = LOWER(TRIM(#{city}))
+      )
+    </if>
+    ORDER BY id DESC
+  </select>
+
+  <update id="updateCoordinatesById">
+    UPDATE place
+    SET latitude = #{latitude},
+        longitude = #{longitude}
+    WHERE id = #{id}
+      AND (
+        latitude IS NULL OR longitude IS NULL
+        OR latitude &lt;&gt; #{latitude}
+        OR longitude &lt;&gt; #{longitude}
+      )
+  </update>
+
+  <select id="findExistingId" parameterType="thesis.project.gu.model.Place" resultType="long">
+    SELECT id FROM place
+    WHERE name = #{name}
+      AND address = #{address}
+      AND city = #{city}
+      AND ( (district IS NULL AND #{district} IS NULL) OR district = #{district} )
+      AND country = #{country}
+    LIMIT 1
+  </select>
+
   <!-- 单条 UPSERT：依赖唯一键 (source, external_ref) -->
-  <insert id="upsert" parameterType="thesis.project.gu.model.Place">
-    INSERT INTO place
-    (name, address, city, district, country, latitude, longitude, source, external_ref)
-    VALUES
-      (#{name}, #{address}, #{city}, #{district}, #{country}, #{latitude}, #{longitude}, #{source}, #{externalRef})
+  <insert id="upsert" useGeneratedKeys="true" keyProperty="id"
+          parameterType="thesis.project.gu.model.Place">
+    INSERT INTO place (name, address, city, district, country, latitude, longitude, source, external_ref, website_uri, google_maps_uri, business_status)
+    VALUES (#{name}, #{address}, #{city}, #{district}, #{country},
+    #{latitude}, #{longitude}, #{source}, #{externalRef}, #{websiteUri}, #{googleMapsUri}, #{businessStatus})
     ON DUPLICATE KEY UPDATE
-                       name=VALUES(name),
-                       address=VALUES(address),
-                       city=VALUES(city),
-                       district=VALUES(district),
-                       country=VALUES(country),
-                       latitude=VALUES(latitude),
-                       longitude=VALUES(longitude)
+    id = LAST_INSERT_ID(id),             <!-- ★ 关键：确保 getGeneratedKeys 返回现有行的 id -->
+    name = VALUES(name),
+    address = VALUES(address),
+    city = VALUES(city),
+    district = VALUES(district),
+    country = VALUES(country),
+    latitude = VALUES(latitude),
+    longitude = VALUES(longitude),
+    website_uri = VALUES(website_uri),
+    google_maps_uri = VALUES(google_maps_uri),
+    business_status = VALUES(business_status);
   </insert>
 
   <!-- 批量 UPSERT（MySQL 8 OK） -->
   <insert id="batchUpsert">
     INSERT INTO place
-    (name, address, city, district, country, latitude, longitude, source, external_ref)
+    (name, address, city, district, country, latitude, longitude, source, external_ref, website_uri, google_maps_uri, business_status)
     VALUES
     <foreach collection="list" item="p" separator=",">
       (#{p.name}, #{p.address}, #{p.city}, #{p.district}, #{p.country},
-      #{p.latitude}, #{p.longitude}, #{p.source}, #{p.externalRef})
+      #{p.latitude}, #{p.longitude}, #{p.source}, #{p.externalRef}, #{p.websiteUri}, #{p.googleMapsUri}, #{p.businessStatus})
     </foreach>
     ON DUPLICATE KEY UPDATE
     name=VALUES(name),
@@ -55,7 +121,10 @@
     district=VALUES(district),
     country=VALUES(country),
     latitude=VALUES(latitude),
-    longitude=VALUES(longitude)
+    longitude=VALUES(longitude),
+    website_uri=VALUES(website_uri),
+    google_maps_uri=VALUES(google_maps_uri),
+    business_status=VALUES(business_status)
   </insert>
 
 </mapper>

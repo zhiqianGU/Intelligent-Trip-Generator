@@ -12,5 +12,7 @@ public record RegisterReq(
         @Size(min = 6, max = 32)
         String password,
 
-        String name
+        String name,
+        String challengeId,
+        String challengeAnswer
 ) {}

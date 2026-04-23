@@ -1,230 +1,308 @@
-<!-- index.html -->
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
-    <meta charset="UTF-8"/>
-    <title>仿 Google 地图 Demo</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" crossorigin="">
-    <link rel="stylesheet" href="/css/map.css?v=2025-08-09-04"/>
-    <link rel="stylesheet" href="/css/auth.css?v=2025-08-09-09"/>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Travel Planning Generation</title>
+  <link rel="stylesheet" href="/css/index.css?v=2026-04-10-08"/>
 </head>
 <body>
-<!-- 左侧 80px 侧边栏 -->
-<div id="sidebar">
-    <div class="sidebar-header">我的</div>
-    <ul class="sidebar-menu">
-        <li id="menu-saved">已保存</li>
-        <li id="menu-recent">最近</li>
-    </ul>
-</div>
+<div class="page">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-badge">AI</div>
+      <div>
+        <h1>Travel Planning Generation System</h1>
+        <p>Input the requirements, and the structured itinerary will be returned. You can also navigate to the map to view the route.</p>
+      </div>
+    </div>
+    <div class="nav-actions">
+      <a class="btn btn-outline" href="analysis-dashboard.html">Efficiency Dashboard</a>
+      <a id="btnMapView" class="btn btn-outline" href="map.html">Map viewing</a>
+<!--      <button id="btnScrollAuth" class="btn btn-primary">Log In / Register</button>-->
+    </div>
+  </header>
 
-<!-- 地图 -->
-<div id="map"></div>
-
-<!-- 顶部搜索框 -->
-<!--<div id="search-container">-->
-<!--    <input id="origin" placeholder="(POI)"/>-->
-<!--    <button class="suggest-btn" data-target="origin">🔍</button>-->
-<!--    <input id="destination" placeholder="选择目的地"/>-->
-<!--    <button class="suggest-btn" data-target="destination">🔍</button>-->
-<!--    <input id="city" placeholder="城市（公交必填）"/>-->
-<!--    <button id="btnGo" class="primary">立即出发</button>-->
-<!--</div>-->
-
-<!-- 顶部右侧：账号/用户 -->
-<div id="account-bar" style="position:fixed;top:16px;right:16px;z-index:1001;display:flex;gap:8px;align-items:center;">
-    <!-- 未登录：显示 登录/注册 按钮 -->
-    <button id="btnOpenAuth" class="account-btn logged-out">登录 / 注册</button>
-
-    <!-- 已登录：显示头像 + 下拉菜单 -->
-    <div id="userMenu" class="user-menu logged-in" style="display:none;position:relative;">
-        <div class="user-chip" id="userChip" title="账户">
-            <span id="userInitial">U</span>
+  <section class="hero">
+    <div class="hero-wrap">
+      <div class="hero-card">
+        <div class="eyebrow">AI Travel Planning · Home Page</div>
+        <h2>Make a plan first, and then check the daily route on the map.</h2>
+        <p class="desc">
+          The homepage focuses on two main aspects: user registration and login, as well as generating structured travel plans based on factors such as city, duration, budget, number of people, style, and pace. The map function remains on a separate page, and after the plan is generated, you can directly jump to view the route.
+        </p>
+        <div class="mini-grid">
+          <div class="mini-item">
+            <strong>Input dimension</strong>
+            <span>City, days, budget, number of people, style, rhythm</span>
+          </div>
+          <div class="mini-item">
+            <strong>system output</strong>
+            <span>Where to stay each day, where to go each day, and how long to stay at each location</span>
+          </div>
+          <div class="mini-item">
+            <strong>Subsequent collaboration</strong>
+            <span>After saving the plan, you can switch between days on the map page to view the route.</span>
+          </div>
         </div>
-        <div class="user-dropdown" id="userDropdown" style="display:none;">
-            <div class="user-info" style="padding:8px 16px;">
-                <div id="userName" style="font-weight:600;">未命名</div>
-                <div id="userEmail" class="muted" style="font-size:12px;color:#5f6368;"></div>
+      </div>
+      <div class="side-card auth-card" id="authSection">
+        <div id="accountUser" class="user-card">
+          <div class="user-row">
+            <div>
+              <div id="userName" class="user-name">not log in</div>
+              <div id="userHint" class="muted"></div>
             </div>
-            <hr/>
-            <button class="menu-item" id="gotoSaved">已保存</button>
-            <button class="menu-item" id="gotoRecent">最近</button>
-            <hr/>
-            <button class="menu-item danger" id="btnLogout">退出登录</button>
+            <button id="btnLogout" class="ghost-btn">log out</button>
+          </div>
         </div>
-    </div>
-</div>
 
-<!-- 左侧“路线面板” -->
-<div id="directions">
-    <div class="modes">
-        <button data-mode="car" class="mode active">🚗</button>
-        <button data-mode="transit" class="mode">🚌</button>
-        <button data-mode="walk" class="mode">🚶</button>
-    </div>
-
-    <div class="inputs">
-        <div class="field">
-            <input id="origin" placeholder="选择起点"/>
-            <button class="suggest-btn" data-target="origin">🔍</button>
-            <div class="suggest-list" id="origin-suggest"></div>
+        <div id="accountActionsWrap" class="user-actions">
+          <button id="btnHistoryPlans" type="button" class="ghost-btn">View History Plans</button>
+          <button id="btnFavoritePlans" type="button" class="ghost-btn">View Favorite Plans</button>
         </div>
-        <div class="field">
-            <input id="destination" placeholder="选择目的地"/>
-            <button class="suggest-btn" data-target="destination">🔍</button>
-            <div class="suggest-list" id="dest-suggest"></div>
-        </div>
-        <div class="field">
-            <input id="city" placeholder="城市（可选，例如：北京）"/>
-        </div>
-        <button id="btnGo" class="primary">立即出发</button>
-    </div>
-
-    <div id="summary" class="summary" hidden>
-        <div class="title">路线</div>
-        <div class="cards">
-            <div class="card" id="carCard" hidden>🚗 <b id="carTime"></b> · <span id="carDist"></span></div>
-            <div class="card" id="transitCard" hidden>🚌 <b id="transitTime"></b> · <span id="transitDist"></span></div>
-            <div class="card" id="walkCard" hidden>🚶 <b id="walkTime"></b> · <span id="walkDist"></span></div>
-        </div>
-    </div>
-
-    <div id="steps" class="steps" hidden></div>
-</div>
-
-<!-- 认证弹窗（登录 / 注册） -->
-<div id="authModal" class="auth-modal" style="display:none;">
-    <div class="auth-backdrop" id="authBackdrop"></div>
-    <div class="auth-card">
-        <div class="auth-header">
-            <div class="tabs">
-                <button class="tab active" data-tab="login">登录</button>
-                <button class="tab" data-tab="register">注册</button>
+        <div id="planListModal" class="modal" style="display:none;">
+          <div class="modal-mask" id="planListModalMask"></div>
+          <div class="modal-panel">
+            <div class="modal-header">
+              <h3 id="planListModalTitle">Plan List</h3>
+              <button id="planListModalClose" type="button" class="modal-close">×</button>
             </div>
-            <button class="close" id="authClose">✕</button>
-        </div>
-
-        <div class="auth-body">
-            <!-- 登录 -->
-            <form id="loginForm" class="tab-panel" data-panel="login">
-                <label>账号（用户名 / 邮箱 / 手机号）</label>
-                <input id="loginId" type="text" autocomplete="username" required/>
-                <label>密码</label>
-                <input id="loginPassword" type="password" autocomplete="current-password" required/>
-                <div class="row space-between">
-                    <label class="checkbox"><input id="rememberMe" type="checkbox"/> 记住我</label>
-                    <a class="link muted" id="forgotPwd" href="javascript:void(0)">忘记密码？</a>
-                </div>
-                <button type="submit" class="primary full">登录</button>
-            </form>
-
-            <!-- 注册 -->
-            <form id="registerForm" class="tab-panel" data-panel="register" style="display:none;">
-                <label>邮箱（与手机号至少填一个）</label>
-                <input id="regEmail" type="email" autocomplete="email" placeholder="可留空"/>
-                <label>手机号</label>
-                <input id="regPhone" type="tel" autocomplete="tel" placeholder="可留空"/>
-                <label>密码</label>
-                <input id="regPassword" type="password" autocomplete="new-password" required/>
-                <label>用户名（可选）</label>
-                <input id="regUsername" type="text" placeholder="不填则以后再设置"/>
-                <button type="submit" class="primary full">注册</button>
-            </form>
-        </div>
-
-        <div class="auth-footer muted">
-            登录后可使用：已保存列表、路线历史、私人设置等。
-        </div>
-    </div>
-</div>
-
-<!-- ======= 已保存列表 抽屉 + 弹窗 ======= -->
-<!-- 抽屉 -->
-<div id="savedPanel" class="drawer" style="display:none;">
-    <div class="drawer-header">
-        <button id="savedBack" class="icon-btn" title="关闭">✕</button>
-        <div class="title">已保存</div>
-        <button id="btnNewList" class="primary small">新建列表</button>
-    </div>
-
-    <!-- 列表列表视图 -->
-    <div id="savedListsView">
-        <div id="listsContainer" class="list-group"></div>
-    </div>
-
-    <!-- 列表详情（地点项） -->
-    <div id="savedItemsView" style="display:none;">
-        <div class="subheader">
-            <button id="btnBackToLists" class="link">← 返回列表</button>
-            <div class="grow"></div>
-            <button id="btnAddPlace" class="primary small">向此列表添加地点</button>
-        </div>
-        <div class="list-meta">
-            <input id="editListName" class="inline-input" placeholder="列表名称"/>
-            <textarea id="editListNote" class="inline-textarea" placeholder="备注（可选）"></textarea>
-            <div class="row right">
-                <button id="btnSaveListMeta" class="primary small">保存</button>
-                <button id="btnDeleteList" class="danger small">删除列表</button>
+            <div id="planListModalBody" class="modal-body">
+              <div class="muted">Loading...</div>
             </div>
+          </div>
         </div>
-        <div id="itemsContainer" class="list-group"></div>
-    </div>
-</div>
 
-<!-- 新建列表 Modal -->
-<div id="newListModal" class="modal" style="display:none;">
-    <div class="modal-card">
-        <div class="modal-header">
-            <div>新建列表</div>
-            <button class="icon-btn" id="closeNewList">✕</button>
+        <div id="accountPlansBox" class="user-card" style="display:none;">
+          <div class="user-name" style="margin-bottom:10px;">Plan List</div>
+          <div id="accountListBox" class="plan-mini-list"></div>
         </div>
-        <div class="modal-body">
-            <label>名称</label>
-            <input id="newListName"/>
-            <label>备注（可选）</label>
-            <textarea id="newListNote"></textarea>
-        </div>
-        <div class="modal-footer">
-            <button id="createList" class="primary">创建</button>
-        </div>
-    </div>
-</div>
-
-<!-- 添加地点 Modal（地址 -> 候选 -> 备注） -->
-<div id="addPlaceModal" class="modal" style="display:none;">
-    <div class="modal-card">
-        <div class="modal-header">
-            <div>添加地点到列表</div>
-            <button class="icon-btn" id="closeAddPlace">✕</button>
-        </div>
-        <div class="modal-body">
-            <label>地址</label>
-            <div class="row">
-                <input id="addPlaceAddress" class="grow"/>
-                <button id="btnFetchCandidates" class="secondary">搜索候选</button>
+        <div id="renameModal" class="modal" style="display:none;">
+          <div class="modal-mask" id="renameModalMask"></div>
+          <div class="modal-panel" style="max-width:520px;">
+            <div class="modal-header">
+              <h3 id="renameModalTitle">Name the Plan</h3>
+              <button id="renameModalClose" type="button" class="modal-close">×</button>
             </div>
-            <label>候选结果</label>
-            <select id="addPlaceCandidates"></select>
-            <label>备注（可选）</label>
-            <textarea id="addPlaceNote"></textarea>
+
+            <div class="modal-body">
+              <div class="field full">
+                <label for="renameInput">Plan Title (Optional)</label>
+                <input id="renameInput" type="text" maxlength="128" placeholder="e.g. Brisbane Food Tour - 2 Days" />
+              </div>
+
+              <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button id="renameModalSkip" type="button" class="btn btn-outline">Skip Naming</button>
+                <button id="renameModalConfirm" type="button" class="btn btn-primary">Confirm</button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="modal-footer">
-            <button id="confirmAddPlace" class="primary">添加</button>
+
+        <div id="deletePlanModal" class="modal" style="display:none;">
+          <div class="modal-mask" id="deletePlanModalMask"></div>
+          <div class="modal-panel" style="max-width:420px;">
+            <div class="modal-header">
+              <h3 id="deletePlanModalTitle">Delete Plan</h3>
+              <button id="deletePlanModalClose" type="button" class="modal-close">×</button>
+            </div>
+            <div class="modal-body">
+              <div class="muted">Are you sure you want to delete this plan? This action cannot be undone.</div>
+              <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button id="deletePlanModalCancel" type="button" class="btn btn-outline">Cancel</button>
+                <button id="deletePlanModalConfirm" type="button" class="btn btn-primary">Delete</button>
+              </div>
+            </div>
+          </div>
         </div>
+
+        <h3 id="authEntryTitle">Account entry point</h3>
+        <p>After logging in, you can save your travel plans, add them to your favorites, and continue to view and edit the routes on the map page.</p>
+
+        <div id="authFormsWrap">
+        <div class="tabs">
+          <button class="tab active" data-tab="login">Log In</button>
+          <button class="tab" data-tab="register">Register</button>
+        </div>
+
+        <form id="loginForm" class="tab-panel active" data-panel="login">
+          <div class="field">
+            <label for="loginId">Account (Username / Email / Phone)</label>
+            <input id="loginId" type="text" autocomplete="username" required />
+          </div>
+          <div class="field" style="margin-top:12px;">
+            <label for="loginPassword">Password</label>
+            <input id="loginPassword" type="password" autocomplete="current-password" required />
+          </div>
+          <div class="field" style="margin-top:8px;">
+            <label><input id="toggleLoginPassword" type="checkbox" style="width:auto; margin-right:8px;" />Show password</label>
+          </div>
+          <div class="field" style="margin-top:12px;">
+            <label><input id="rememberMe" type="checkbox" style="width:auto; margin-right:8px;" />Remember me</label>
+          </div>
+          <div id="loginChallengeBox" class="field challenge-box" style="display:none;">
+            <label for="loginChallengeAnswer">Verification</label>
+            <div class="challenge-row">
+              <span id="loginChallengeQuestion" class="challenge-question"></span>
+              <button id="loginChallengeRefresh" type="button" class="challenge-refresh">Refresh</button>
+            </div>
+            <input id="loginChallengeId" type="hidden" />
+            <input id="loginChallengeAnswer" type="text" inputmode="numeric" autocomplete="off" placeholder="Answer" />
+          </div>
+          <button type="submit" class="primary">Log In</button>
+        </form>
+
+        <form id="registerForm" class="tab-panel" data-panel="register">
+          <div class="field">
+            <label for="regEmail">Email (fill in at least email or phone)</label>
+            <input id="regEmail" type="email" autocomplete="email" placeholder="Optional" />
+          </div>
+          <div class="field" style="margin-top:12px;">
+            <label for="regPhone">Phone Number</label>
+            <input id="regPhone" type="tel" autocomplete="tel" placeholder="Optional" />
+          </div>
+          <div class="field" style="margin-top:12px;">
+            <label for="regPassword">Password</label>
+            <input id="regPassword" type="password" autocomplete="new-password" required />
+          </div>
+          <div class="field" style="margin-top:8px;">
+            <label><input id="toggleRegPassword" type="checkbox" style="width:auto; margin-right:8px;" />Show password</label>
+          </div>
+          <div class="field" style="margin-top:12px;">
+            <label for="regUsername">Username (Optional)</label>
+            <input id="regUsername" type="text" placeholder="You can leave this blank and set it later" />
+          </div>
+          <div id="registerChallengeBox" class="field challenge-box">
+            <label for="registerChallengeAnswer">Verification</label>
+            <div class="challenge-row">
+              <span id="registerChallengeQuestion" class="challenge-question"></span>
+              <button id="registerChallengeRefresh" type="button" class="challenge-refresh">Refresh</button>
+            </div>
+            <input id="registerChallengeId" type="hidden" />
+            <input id="registerChallengeAnswer" type="text" inputmode="numeric" autocomplete="off" placeholder="Answer" required />
+          </div>
+          <button type="submit" class="primary">Register</button>
+        </form>
+        </div>
+
+        <div id="authNote" class="small-note">
+          After registering successfully, you can log in directly. The page is already prepared to integrate with the existing <code>/auth/login</code> and <code>/auth/register</code> endpoints.
+        </div>
+      </div>
     </div>
+  </section>
+
+  <section class="panel-wrap">
+    <section class="plan-panel">
+      <h3 class="section-title">Generate Travel Plan</h3>
+      <p class="section-subtitle">After submission, <code>/api/v1/plans/draft</code> will be called to return structured JSON, and a readable result will be displayed on the right.</p>
+
+      <form id="generateForm">
+        <div class="form-grid">
+          <div class="field full">
+            <label for="city">City</label>
+            <input id="city" name="city" type="text" placeholder="e.g. Brisbane" required />
+          </div>
+          <div class="field">
+            <label for="days">Days</label>
+            <input id="days" name="days" type="number" min="1" max="30" value="2" required />
+          </div>
+          <div class="field">
+            <label for="budget">Budget</label>
+            <input id="budget" name="budget" type="number" min="1" value="1200" required />
+          </div>
+          <div class="field">
+            <label for="adults">Adults</label>
+            <input id="adults" name="adults" type="number" min="1" value="2" required />
+          </div>
+          <div class="field">
+            <label for="kids">Children</label>
+            <input id="kids" name="kids" type="number" min="0" value="0" required />
+          </div>
+          <div class="field">
+            <label for="departureDate">Departure Date</label>
+            <input id="departureDate" name="departureDate" type="date" required />
+          </div>
+          <div class="field full">
+            <label>Style</label>
+            <div class="checkbox-row">
+              <label class="chip"><input type="checkbox" name="style" value="nature" />Nature</label>
+              <label class="chip"><input type="checkbox" name="style" value="culture" />Culture / Museums</label>
+              <label class="chip"><input type="checkbox" name="style" value="market_shopping" />Market / Shopping</label>
+              <label class="chip"><input type="checkbox" name="style" value="theme_park" />Theme Park</label>
+            </div>
+          </div>
+          <div class="field full">
+            <label for="pace">Pace</label>
+            <select id="pace" name="pace">
+              <option value="relaxed">Relaxed</option>
+              <option value="normal" selected>Moderate</option>
+              <option value="rush">Fast-paced</option>
+            </select>
+          </div>
+          <div class="field full">
+            <label for="mainModel">Main generation model</label>
+            <select id="mainModel" name="mainModel">
+              <option value="qwen-max" selected>Qwen Max</option>
+              <option value="qwen-plus">Qwen Plus</option>
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash (may fail)</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="btnGenerate" type="submit" class="primary">Generate Travel Plan</button>
+        <div id="generateProgress" class="generate-progress" style="display:none;">
+          <div class="generate-progress-head">
+            <strong id="generateProgressLabel">Preparing request...</strong>
+            <span id="generateProgressPercent">0%</span>
+          </div>
+          <div class="generate-progress-track">
+            <div id="generateProgressFill" class="generate-progress-fill"></div>
+          </div>
+          <div id="generateProgressHint" class="generate-progress-hint">Building itinerary request and validating constraints.</div>
+        </div>
+        <a class="secondary-link" href="map.html">Go directly to the map page</a>
+        <div id="loginHint" class="login-tip">You can generate a draft without logging in; after logging in, it is better for saving, favoriting, and continuing to edit the plan.</div>
+      </form>
+    </section>
+
+    <section class="result-wrap">
+      <div id="resultEmpty" class="hero-card result-placeholder">
+        <div class="eyebrow">Results</div>
+        <h3>The structured plan will appear here</h3>
+        <p>
+          After successful generation, this section will display the city, number of days, budget, number of travelers, where to stay each day, how many places to visit each day, and the recommended stay duration for each place. You can also save the result locally and continue route visualization on the map page.
+        </p>
+      </div>
+
+      <div id="resultContent" class="result-card">
+        <div class="result-head">
+          <div>
+            <h3 id="resultTitle">Travel Plan</h3>
+            <div id="resultSubtitle" class="muted"></div>
+          </div>
+          <div class="meta-badges" id="resultMeta"></div>
+        </div>
+
+        <div id="previewBox" class="preview-box" style="display:none;"></div>
+        <div id="budgetOverview" class="budget-overview" style="display:none;"></div>
+        <div id="resultDays" class="days-list"></div>
+
+        <div class="result-actions">
+          <a id="btnOpenMap" data-action="goto-map" class="btn btn-primary" href="/map.html">Open Map View</a>
+          <button id="btnCopyJson" class="btn btn-outline" type="button">Copy JSON</button>
+          <button id="btnClearPlan" class="btn btn-outline" type="button">Clear This Plan</button>
+          <button id="btnFavoritePlan" class="btn btn-outline" type="button" disabled>Favorite This Plan (Login Required)</button>
+        </div>
+      </div>
+    </section>
+  </section>
 </div>
 
-<!-- Leaflet -->
-<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js" crossorigin=""></script>
-<!-- 业务脚本 -->
+<div id="toast" class="toast"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-<script src="/js/axios-setup.js"></script>
-<script src="/js/app.js?v=2025-08-09-13"></script>
-<script src="/js/auth.js?v=2025-08-09-09"></script>
-<script src="/js/lists.js?v=2025-08-09-011"></script>
+<script src="/js/travel-home1.js?v=2026-04-20-04"></script>
 </body>
 </html>
-
-
-
-

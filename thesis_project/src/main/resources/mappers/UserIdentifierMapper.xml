@@ -27,4 +27,10 @@
         WHERE identifier = #{identifier}
         LIMIT 1
     </select>
+
+    <select id="findByUserId" resultMap="idenMap">
+        SELECT * FROM user_identifier
+        WHERE user_id = #{userId}
+        ORDER BY id ASC
+    </select>
 </mapper>

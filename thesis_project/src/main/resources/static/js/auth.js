@@ -1,19 +1,18 @@
-
-// auth.js — 登录注册逻辑（防止 $ 冲突）
-// 简单 DOM 选择器封装
-// ===== 小工具 =====
-const $$  = sel => document.querySelector(sel);
+const $$ = sel => document.querySelector(sel);
 const $$$ = sel => document.querySelectorAll(sel);
 
 const API = {
-    login:    '/auth/login',
+    login: '/auth/login',
     register: '/auth/register',
-
+    challenge: '/auth/challenge',
+    refresh: '/auth/refresh',
+    logout: '/auth/logout',
+    me: '/auth/me'
 };
 
 const STORAGE_KEY = 'nav_jwt';
+let currentAuthProfile = null;
 
-// 解析 JWT payload（无校验，只做 UI 用）
 function parseJwt(token) {
     try {
         const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -21,229 +20,386 @@ function parseJwt(token) {
             '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
         ).join(''));
         return JSON.parse(json);
-    } catch { return null; }
+    } catch {
+        return null;
+    }
 }
 
-function nowSec() { return Math.floor(Date.now()/1000); }
+function nowSec() {
+    return Math.floor(Date.now() / 1000);
+}
 
 function getToken() {
-    // 优先 localStorage（记住我），其次 sessionStorage
     return localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY) || null;
 }
-function setToken(token, remember) {
-    // 只存一个地方，避免混乱
+
+function setToken(token) {
     localStorage.removeItem(STORAGE_KEY);
     sessionStorage.removeItem(STORAGE_KEY);
-    if (remember) localStorage.setItem(STORAGE_KEY, token);
-    else          sessionStorage.setItem(STORAGE_KEY, token);
+    sessionStorage.setItem(STORAGE_KEY, token);
 }
+
 function clearToken() {
     localStorage.removeItem(STORAGE_KEY);
     sessionStorage.removeItem(STORAGE_KEY);
 }
 
-// 包装 fetch：自动带 Authorization；401 自动登出
-async function authFetch(url, options={}) {
-    const token = getToken();
-    const headers = new Headers(options.headers || {});
-    if (token) headers.set('Authorization', 'Bearer ' + token);
-    headers.set('Content-Type', 'application/json');
+function setButtonLoading(button, loading, loadingText) {
+    if (!button) return;
+    if (loading) {
+        button.dataset.originalText = button.textContent || '';
+        button.textContent = loadingText;
+        button.disabled = true;
+        return;
+    }
+    button.disabled = false;
+    if (button.dataset.originalText) {
+        button.textContent = button.dataset.originalText;
+        delete button.dataset.originalText;
+    }
+}
 
-    const resp = await fetch(url, { ...options, headers });
-    if (resp.status === 401) {
-        // token 过期/无效
+async function loadChallenge(kind, visible = true) {
+    const box = $$('#' + kind + 'ChallengeBox');
+    const question = $$('#' + kind + 'ChallengeQuestion');
+    const challengeId = $$('#' + kind + 'ChallengeId');
+    const answer = $$('#' + kind + 'ChallengeAnswer');
+    try {
+        const resp = await fetch(API.challenge, { method: 'GET' });
+        const data = await safeJson(resp);
+        if (!resp.ok || !data?.challengeId || !data?.question) {
+            throw new Error(data?.message || 'Challenge failed to load');
+        }
+        if (box) box.style.display = visible ? '' : 'none';
+        if (question) question.textContent = data.question;
+        if (challengeId) challengeId.value = data.challengeId;
+        if (answer) answer.value = '';
+    } catch (err) {
+        console.error(err);
+        alert(err.message || 'Challenge failed to load');
+    }
+}
+
+function isChallengeVisible(kind) {
+    const box = $$('#' + kind + 'ChallengeBox');
+    return !!box && box.style.display !== 'none';
+}
+
+async function safeJson(resp) {
+    try {
+        return await resp.json();
+    } catch {
+        return null;
+    }
+}
+
+async function refreshAccessToken() {
+    try {
+        const resp = await fetch(API.refresh, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        const data = await safeJson(resp);
+        if (!resp.ok || !data?.token) {
+            clearToken();
+            return null;
+        }
+        setToken(data.token);
+        return data;
+    } catch {
         clearToken();
-        // 弹个轻提示（简单起见用 alert）
-        alert('登录已过期，请重新登录');
+        return null;
+    }
+}
+
+async function authFetch(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+
+    let resp = await fetch(url, { ...options, headers, credentials: 'include' });
+
+    if (resp.status === 401) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed?.token) {
+            const retryHeaders = new Headers(options.headers || {});
+            retryHeaders.set('Authorization', `Bearer ${refreshed.token}`);
+            if (!retryHeaders.has('Content-Type')) retryHeaders.set('Content-Type', 'application/json');
+            resp = await fetch(url, { ...options, headers: retryHeaders, credentials: 'include' });
+        }
+    }
+
+    if (resp.status === 401) {
+        clearToken();
+        alert('Login expired. Please log in again.');
         renderUserLoggedOut();
     }
+
     return resp;
 }
 
-// ====== UI：登录态渲染 ======
+function setCurrentAuthProfile(profile) {
+    currentAuthProfile = profile || null;
+    window.currentAuthProfile = currentAuthProfile;
+}
+
+function getCurrentAuthProfile() {
+    return currentAuthProfile || window.currentAuthProfile || null;
+}
+
+async function loadCurrentUserProfile() {
+    const resp = await authFetch(API.me, { method: 'GET', headers: {} });
+    const user = await safeJson(resp);
+    if (!resp.ok || !user) {
+        throw new Error('Failed to load current user');
+    }
+    setCurrentAuthProfile(user);
+    return user;
+}
+
 function renderUserLoggedIn({ username, email }) {
     const btnOpenAuth = $$('#btnOpenAuth');
-    const userMenu    = $$('#userMenu');
+    const userMenu = $$('#userMenu');
     const userInitial = $$('#userInitial');
-    const userNameEl  = $$('#userName');
+    const userNameEl = $$('#userName');
     const userEmailEl = $$('#userEmail');
 
-    btnOpenAuth.style.display = 'none';
-    userMenu.style.display = 'block';
+    if (btnOpenAuth) btnOpenAuth.style.display = 'none';
+    if (userMenu) userMenu.style.display = 'block';
 
-    userInitial.textContent = (username || email || 'U').trim().charAt(0).toUpperCase();
-    userNameEl.textContent  = username || email || '未命名';
-    userEmailEl.textContent = email || '';
+    if (userInitial) userInitial.textContent = (username || email || 'U').trim().charAt(0).toUpperCase();
+    if (userNameEl) userNameEl.textContent = username || email || 'Unnamed User';
+    if (userEmailEl) userEmailEl.textContent = email || '';
+    if (typeof renderMapAccountState === 'function') renderMapAccountState();
+    if (typeof renderMapPlanLibrary === 'function') renderMapPlanLibrary();
 }
 
 function renderUserLoggedOut() {
-    $$('#btnOpenAuth').style.display = 'block';
-    $$('#userMenu').style.display    = 'none';
+    setCurrentAuthProfile(null);
+    const btnOpenAuth = $$('#btnOpenAuth');
+    const userMenu = $$('#userMenu');
+    if (btnOpenAuth) btnOpenAuth.style.display = 'block';
+    if (userMenu) userMenu.style.display = 'none';
     const dd = $$('#userDropdown');
     if (dd) dd.style.display = 'none';
+    if (typeof renderMapAccountState === 'function') renderMapAccountState();
+    if (typeof renderMapPlanLibrary === 'function') renderMapPlanLibrary();
 }
 
-// 从 token 或 /me 获取用户信息
 async function loadUserFromToken() {
-    const token = getToken();
-    if (!token) { renderUserLoggedOut(); return; }
-    // 过期检查
-    const payload = parseJwt(token);
-    if (payload?.exp && payload.exp < nowSec()) {
-        clearToken();
-        renderUserLoggedOut();
-        return;
-    }
-
-    // 优先调 /me，失败则用 payload 兜底
-    try {
-        const r = await authFetch(API.me);
-        if (r.ok) {
-            const u = await r.json(); // 期待 {id, username, email, phone,...}
-            renderUserLoggedIn({ username: u.username, email: u.email });
+    if (!getToken()) {
+        const refreshed = await refreshAccessToken();
+        if (!refreshed?.token) {
+            renderUserLoggedOut();
             return;
         }
-    } catch (_) {}
-    // 兜底：直接用 JWT payload
+    }
+
+    let token = getToken();
+    let payload = parseJwt(token);
+    if (payload?.exp && payload.exp < nowSec()) {
+        const refreshed = await refreshAccessToken();
+        if (!refreshed?.token) {
+            clearToken();
+            renderUserLoggedOut();
+            return;
+        }
+        token = getToken();
+        payload = parseJwt(token);
+    }
+
+    try {
+        const user = await loadCurrentUserProfile();
+        renderUserLoggedIn({
+            username: user?.username || payload?.username,
+            email: user?.email || payload?.email
+        });
+        return;
+    } catch (_) {
+    }
+
+    setCurrentAuthProfile({
+        username: payload?.username || '',
+        email: payload?.email || '',
+        phone: payload?.phone || '',
+        loggedIn: true
+    });
     renderUserLoggedIn({ username: payload?.username, email: payload?.email });
 }
 
-// ====== 绑定事件 ======
 document.addEventListener('DOMContentLoaded', () => {
-    // 元素引用
-    const btnOpenAuth   = $$('#btnOpenAuth');
-    const authModal     = $$('#authModal');
-    const authBackdrop  = $$('#authBackdrop');
-    const authClose     = $$('#authClose');
-    const tabs          = $$('.tabs');
-    const loginForm     = $$('#loginForm');
-    const registerForm  = $$('#registerForm');
-    const userChip      = $$('#userChip');
-    const userDropdown  = $$('#userDropdown');
-    const btnLogout     = $$('#btnLogout');
+    const btnOpenAuth = $$('#btnOpenAuth');
+    const authModal = $$('#authModal');
+    const authBackdrop = $$('#authBackdrop');
+    const authClose = $$('#authClose');
+    const tabs = $$('.tabs');
+    const loginForm = $$('#loginForm');
+    const registerForm = $$('#registerForm');
+    const userChip = $$('#userChip');
+    const userDropdown = $$('#userDropdown');
+    const btnLogout = $$('#btnLogout');
 
-    // ===== 初始：渲染登录态 =====
     loadUserFromToken();
 
-    // 打开弹窗
-    btnOpenAuth.addEventListener('click', () => { authModal.style.display = 'block'; });
+    btnOpenAuth?.addEventListener('click', () => {
+        if (authModal) authModal.style.display = 'block';
+    });
 
-    // 关闭弹窗（遮罩、X、卡片外）
-    const closeAuth = () => { authModal.style.display = 'none'; };
-    authBackdrop.addEventListener('click', closeAuth);
-    authClose.addEventListener('click', closeAuth);
-    const authCard = document.querySelector('.auth-card');
-    if (authCard) authCard.addEventListener('click', e => e.stopPropagation());
-    authModal.addEventListener('click', (e) => { if (e.target === authModal) closeAuth(); });
+    const closeAuth = () => {
+        if (authModal) authModal.style.display = 'none';
+    };
+    authBackdrop?.addEventListener('click', closeAuth);
+    authClose?.addEventListener('click', closeAuth);
+    document.querySelector('.auth-card')?.addEventListener('click', e => e.stopPropagation());
+    authModal?.addEventListener('click', e => {
+        if (e.target === authModal) closeAuth();
+    });
 
-    // Tab 切换
-    tabs.addEventListener('click', e => {
+    tabs?.addEventListener('click', e => {
         if (!e.target.classList.contains('tab')) return;
         tabs.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
         e.target.classList.add('active');
         const targetPanel = e.target.dataset.tab;
-        $$$('.tab-panel').forEach(p => { p.style.display = (p.dataset.panel === targetPanel) ? '' : 'none'; });
+        $$$('.tab-panel').forEach(p => {
+            p.style.display = p.dataset.panel === targetPanel ? '' : 'none';
+        });
     });
 
-    // 登录提交
-    loginForm.addEventListener('submit', async e => {
+    loginForm?.addEventListener('submit', async e => {
         e.preventDefault();
-        const loginId = $$('#loginId').value.trim();
-        const pwd     = $$('#loginPassword').value.trim();
-        const remember= $$('#rememberMe').checked;
+        const loginId = $$('#loginId')?.value.trim() || '';
+        const pwd = $$('#loginPassword')?.value.trim() || '';
+        const remember = !!$$('#rememberMe')?.checked;
+        const submitButton = loginForm.querySelector('button[type="submit"]');
+        const challengeVisible = isChallengeVisible('login');
+        const challengeId = challengeVisible ? ($$('#loginChallengeId')?.value.trim() || '') : '';
+        const challengeAnswer = challengeVisible ? ($$('#loginChallengeAnswer')?.value.trim() || '') : '';
 
-        if (!loginId || !pwd) { alert('请输入账号和密码'); return; }
+        if (!loginId || !pwd) {
+            alert('Please enter your account and password.');
+            return;
+        }
+        if (challengeVisible && (!challengeId || !challengeAnswer)) {
+            alert('Please complete the verification challenge.');
+            return;
+        }
 
+        setButtonLoading(submitButton, true, 'Logging in...');
         try {
-            // 根据你后端的定义：这里用 {login, password}
             const resp = await fetch(API.login, {
                 method: 'POST',
-                headers: { 'Content-Type':'application/json' },
-                body: JSON.stringify({ login: loginId, password: pwd })
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ login: loginId, password: pwd, rememberMe: remember, challengeId, challengeAnswer })
             });
-
+            const data = await safeJson(resp);
             if (!resp.ok) {
-                const err = await safeJson(resp);
-                throw new Error(err?.message || `登录失败（${resp.status}）`);
+                throw new Error(data?.message || `Login failed (${resp.status})`);
             }
-            const data = await resp.json(); // 期待 { token: '...' } 或 { token, user:{...} }
-            if (!data.token) throw new Error('登录成功但未返回 token');
+            if (!data?.token) {
+                throw new Error('Login succeeded, but no token was returned.');
+            }
 
-            setToken(data.token, remember);
-
-            // 优先使用后端返回的 user，否则从 JWT 解析
+            setToken(data.token);
             const payload = parseJwt(data.token) || {};
-            const user = data.user || { username: payload.username, email: payload.email };
+            const user = await loadCurrentUserProfile().catch(() => (
+                data.user || { username: payload.username, email: payload.email }
+            ));
             renderUserLoggedIn(user);
-
             closeAuth();
         } catch (err) {
             console.error(err);
-            alert(err.message || '登录异常');
+            alert(err.message || 'Login error');
+            await loadChallenge('login', true);
+        } finally {
+            setButtonLoading(submitButton, false);
         }
     });
 
-    // 注册提交
-    registerForm.addEventListener('submit', async e => {
+    $$('#loginChallengeRefresh')?.addEventListener('click', () => loadChallenge('login', true));
+    $$('#registerChallengeRefresh')?.addEventListener('click', () => loadChallenge('register', true));
+
+    registerForm?.addEventListener('submit', async e => {
         e.preventDefault();
-        const email = $$('#regEmail').value.trim();
-        const phone = $$('#regPhone').value.trim();
-        const pwd   = $$('#regPassword').value;
-        const name  = $$('#regUsername').value.trim();
-
-        // 至少一个账号
+        const email = $$('#regEmail')?.value.trim() || '';
+        const phone = $$('#regPhone')?.value.trim() || '';
+        const pwd = $$('#regPassword')?.value || '';
+        const name = $$('#regUsername')?.value.trim() || '';
         const login = email || phone;
-        if (!login) { alert('邮箱与手机号至少填写一个'); return; }
-        if (!pwd) { alert('请输入密码'); return; }
+        const submitButton = registerForm.querySelector('button[type="submit"]');
+        const challengeId = $$('#registerChallengeId')?.value.trim() || '';
+        const challengeAnswer = $$('#registerChallengeAnswer')?.value.trim() || '';
 
+        if (!login) {
+            alert('Please enter at least an email or a phone number.');
+            return;
+        }
+        if (!pwd) {
+            alert('Please enter a password.');
+            return;
+        }
+        if (!challengeId || !challengeAnswer) {
+            alert('Please complete the verification challenge.');
+            return;
+        }
+
+        setButtonLoading(submitButton, true, 'Creating account...');
         try {
-            const resp = await fetch('/auth/register', {
+            const resp = await fetch(API.register, {
                 method: 'POST',
+                credentials: 'include',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    login: login,          // ← 必须叫 login
-                    password: pwd,         // ← 密码
-                    name: name || null     // ← 可选用户名
-                })
+                body: JSON.stringify({ login, password: pwd, name: name || null, challengeId, challengeAnswer })
             });
-
+            const data = await safeJson(resp);
             if (!resp.ok) {
-                const msg = await resp.text();
-                throw new Error(msg || `注册失败 (${resp.status})`);
+                throw new Error(data?.message || `Registration failed (${resp.status})`);
+            }
+            if (!data?.token) {
+                throw new Error('Registration succeeded, but no token was returned.');
             }
 
-            // 注册成功：切换到登录 Tab，并把账号预填
-            tabs.querySelector('[data-tab="login"]').click();
-            $$('#loginId').value = login;
-            $$('#loginPassword').focus();
-            alert('注册成功，请登录');
+            setToken(data.token);
+            const payload = parseJwt(data.token) || {};
+            const user = await loadCurrentUserProfile().catch(() => (
+                data.user || { username: payload.username, email: payload.email }
+            ));
+            renderUserLoggedIn(user);
+            closeAuth();
+            alert('Registration successful. You are now logged in.');
         } catch (err) {
             console.error(err);
-            alert(err.message || '注册异常');
+            alert(err.message || 'Registration error');
+            await loadChallenge('register', true);
+        } finally {
+            setButtonLoading(submitButton, false);
         }
     });
 
-    // 用户头像点击 — 切换菜单显示
-    userChip.addEventListener('click', () => {
-        const isShown = userDropdown.style.display === 'block';
-        userDropdown.style.display = isShown ? 'none' : 'block';
+    userChip?.addEventListener('click', () => {
+        if (!userDropdown) return;
+        userDropdown.style.display = userDropdown.style.display === 'block' ? 'none' : 'block';
     });
-    // 点击页面其他区域时收起菜单
-    document.addEventListener('click', (e) => {
+
+    document.addEventListener('click', e => {
+        if (!userDropdown || !userChip) return;
         if (!userDropdown.contains(e.target) && !userChip.contains(e.target)) {
             userDropdown.style.display = 'none';
         }
     });
 
-    // 退出登录
-    btnLogout.addEventListener('click', () => {
-        clearToken();
-        renderUserLoggedOut();
+    btnLogout?.addEventListener('click', async () => {
+        try {
+            await fetch(API.logout, {
+                method: 'POST',
+                credentials: 'include'
+            });
+        } finally {
+            clearToken();
+            renderUserLoggedOut();
+        }
     });
-});
 
-// 安全 JSON 解析
-async function safeJson(resp) {
-    try { return await resp.json(); }
-    catch { return null; }
-}
+    loadChallenge('register', true);
+});

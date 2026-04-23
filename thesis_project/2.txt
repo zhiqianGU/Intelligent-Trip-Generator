@@ -1,0 +1,233 @@
+下面这套是 不调真实 AI、不调 Google Geocoding、不调 Google Places 的 mock 主实验流程。它仍然会调你的 map provider，也就是现在 amap.base-url 指向的 Geoapify，用于 /map/geocode、/map/route、/route-suggestions 的路线相关测试。
+1. 确认 perf-test 配置
+src/main/resources/application-perf-test.yml 建议保持这样：
+app:
+  ai:
+    mock-enabled: true
+    mock-polish-enabled: false
+    mock-raw-path: classpath:perf/mock-draft-raw.json
+    mock-retry-raw-path: classpath:perf/mock-draft-retry-raw.json
+
+google:
+  geocoding:
+    enabled: false
+  places:
+    enabled: false
+这表示：
+•
+不调真实 AI generation
+•
+不调真实 AI regenerate
+•
+不调真实 AI copy polish
+•
+不调 Google Geocoding
+•
+不调 Google Places
+•
+/draft 和 /raw 仍走完整后端 itinerary pipeline
+如果你还没有把 google.*.enabled=false 放进 application-perf-test.yml，先补上。
+2. 启动后端
+先停掉旧服务，然后重新启动：
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=perf-test" "-Dspring-boot.run.jvmArguments=--enable-preview"
+启动成功后，不要关闭这个窗口。
+如果你把 Geoapify key 写进 yml 了，就不需要额外设置环境变量。
+如果没有写死 key，则启动前需要：
+$env:AMAP_KEY="你的Geoapify key"
+3. 先做 smoke run
+另开一个 PowerShell：
+.\scripts\load-test.ps1 `
+  -BaseUrl "http://localhost:8080" `
+  -AiMode mock `
+  -Iterations 2 `
+  -ConcurrencyLevels 1,5 `
+  -IncludePlanDraft `
+  -IncludeHeavyConcurrency `
+  -HeavyIterations 1 `
+  -HeavyConcurrencyLevels 1
+跑完后检查最新输出：
+scripts/results/load-test-*.json
+你要确认这些都是 100% success：
+•
+geocode
+•
+route
+•
+route_suggestions
+•
+plan_draft
+•
+plan_raw
+如果 /raw 已经像你刚刚手测那样 STATUS: 200，这轮一般就能通过。
+4. 正式主实验
+smoke run 没问题后，跑正式 mock backend-only benchmark：
+.\scripts\load-test.ps1 `
+  -BaseUrl "http://localhost:8080" `
+  -AiMode mock `
+  -Iterations 10 `
+  -ConcurrencyLevels 1,5,10,20 `
+  -IncludePlanDraft `
+  -IncludeHeavyConcurrency `
+  -HeavyIterations 3 `
+  -HeavyConcurrencyLevels 1,5,10,20
+这轮覆盖：
+endpoint
+覆盖位置
+/api/v1/plans/draft
+cold/warm A/B + heavy concurrency
+/api/v1/plans/raw
+heavy concurrency
+/api/v1/plans/route-suggestions
+cold/warm A/B + light concurrency
+/api/v1/map/geocode
+cold/warm A/B + light concurrency
+/api/v1/map/route
+cold/warm A/B + light concurrency
+注意：当前脚本还没有 /api/v1/plans/weather，所以 weather 不会进入这份 JSON。
+5. 保留结果文件
+跑完正式主实验后，把最新的：
+scripts/results/load-test-YYYYMMDD-HHmmss.json
+保留并重命名成更清楚的名字，例如：
+scripts/results/mock-backend-no-ai-no-google-c1-5-10-20.json
+这份用于：
+•
+dashboard 上传展示
+•
+thesis 主实验表格
+•
+latency distribution
+•
+service rate comparison
+•
+concurrency analysis
+•
+A/B cold vs warm comparison
+建议同时保留 smoke run：
+scripts/results/mock-smoke-no-ai-no-google.json
+用于证明实验前环境校验通过。
+6. Dashboard 展示
+打开：
+http://localhost:8080/analysis-dashboard.html
+上传正式 JSON：
+scripts/results/mock-backend-no-ai-no-google-c1-5-10-20.json
+你应该重点看：
+•
+AI mode: mock backend-only benchmark
+•
+Benchmark metadata
+•
+A vs B summary
+•
+Latency distribution by endpoint
+•
+Service rate comparison
+•
+Latency vs concurrency
+•
+Service rate vs concurrency
+•
+Success / failure column
+7. 结果整理模板
+把正式 JSON 里的核心结果整理成这个表：
+ai_mode
+external AI
+Google Geocoding
+Google Places
+endpoint
+endpoint class
+concurrency
+avg latency ms
+p95 ms
+p99 ms
+service rate rps
+success rate %
+failure count
+mock
+disabled
+disabled
+disabled
+/draft
+heavy orchestration
+1
+mock
+disabled
+disabled
+disabled
+/draft
+heavy orchestration
+5
+mock
+disabled
+disabled
+disabled
+/raw
+heavy full-plan path
+1
+mock
+disabled
+disabled
+disabled
+/raw
+heavy full-plan path
+5
+mock
+disabled
+disabled
+disabled
+/route-suggestions
+supporting route service
+10
+mock
+disabled
+disabled
+disabled
+/map/geocode
+supporting map service
+10
+mock
+disabled
+disabled
+disabled
+/map/route
+supporting map service
+20
+字段来源：
+•
+ai_mode: metadata.ai_mode
+•
+concurrency: concurrencyBreakdown[].concurrency 或 heavyConcurrencyBreakdown[].concurrency
+•
+avg latency ms: avg_latency_ms
+•
+p95 ms: p95_latency_ms
+•
+p99 ms: p99_latency_ms
+•
+service rate rps: throughput_rps
+•
+success rate %: success_rate_pct
+•
+failure count: failures
+8. 推荐 thesis 表述
+可以这样写：
+The main benchmark uses a controlled mock-AI profile. External LLM generation, retry generation, and copy-polish calls are disabled and replaced with fixed raw itinerary samples. Google Geocoding and Google Places verification are also disabled in the perf-test profile. This isolates the Spring Boot itinerary orchestration pipeline while retaining route/geocode service calls required by route-aware scheduling and supporting endpoint evaluation.
+中文解释：
+主实验使用 mock AI 配置。真实 LLM 生成、重试生成和 copy polish 调用被固定样本替代；Google Geocoding 和 Google Places 校验也在 perf-test profile 中关闭。这样可以隔离 Spring Boot 后端 itinerary pipeline 的性能，同时保留 route/geocode 相关服务用于路线感知调度和 supporting endpoint 评估。
+9. 最后检查清单
+正式跑之前确认：
+[ ] 后端使用 perf-test profile 启动
+[ ] JVM 带 --enable-preview
+[ ] app.ai.mock-enabled=true
+[ ] google.geocoding.enabled=false
+[ ] google.places.enabled=false
+[ ] /api/v1/plans/raw 手测 STATUS: 200
+[ ] smoke run 所有 endpoint failure count = 0
+[ ] 正式 JSON 已保存并重命名
+[ ] dashboard 可显示 AI mode 和 concurrency charts
+
+
+新增 RouteSuggestionService，把 /route-suggestions 这坨逻辑从 PlanController 迁出去。
+◦
+PlanController 只负责 request/response。
+◦
+PlanProcessorService 和 RouteSuggestionService 共享 route choice helper，避免两套 recommendation 规则漂移

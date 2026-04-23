@@ -1,0 +1,73 @@
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="thesis.project.gu.mapper.ApiMetricDailyMapper">
+
+    <resultMap id="ApiMetricDailyMap" type="thesis.project.gu.model.ApiMetricDaily">
+        <result property="metricDate" column="metric_date"/>
+        <result property="category" column="category"/>
+        <result property="endpoint" column="endpoint"/>
+        <result property="requestCount" column="request_count"/>
+        <result property="successCount" column="success_count"/>
+        <result property="failureCount" column="failure_count"/>
+        <result property="redisHits" column="redis_hits"/>
+        <result property="redisMisses" column="redis_misses"/>
+        <result property="dbHits" column="db_hits"/>
+        <result property="externalCalls" column="external_calls"/>
+        <result property="externalFailures" column="external_failures"/>
+        <result property="totalLatencyMs" column="total_latency_ms"/>
+        <result property="externalLatencyMs" column="external_latency_ms"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <insert id="upsertDailyMetric" parameterType="thesis.project.gu.model.ApiMetricDaily">
+        INSERT INTO api_metric_daily (
+            metric_date,
+            category,
+            endpoint,
+            request_count,
+            success_count,
+            failure_count,
+            redis_hits,
+            redis_misses,
+            db_hits,
+            external_calls,
+            external_failures,
+            total_latency_ms,
+            external_latency_ms
+        ) VALUES (
+            #{metricDate},
+            #{category},
+            #{endpoint},
+            #{requestCount},
+            #{successCount},
+            #{failureCount},
+            #{redisHits},
+            #{redisMisses},
+            #{dbHits},
+            #{externalCalls},
+            #{externalFailures},
+            #{totalLatencyMs},
+            #{externalLatencyMs}
+        )
+        ON DUPLICATE KEY UPDATE
+            request_count = request_count + VALUES(request_count),
+            success_count = success_count + VALUES(success_count),
+            failure_count = failure_count + VALUES(failure_count),
+            redis_hits = redis_hits + VALUES(redis_hits),
+            redis_misses = redis_misses + VALUES(redis_misses),
+            db_hits = db_hits + VALUES(db_hits),
+            external_calls = external_calls + VALUES(external_calls),
+            external_failures = external_failures + VALUES(external_failures),
+            total_latency_ms = total_latency_ms + VALUES(total_latency_ms),
+            external_latency_ms = external_latency_ms + VALUES(external_latency_ms)
+    </insert>
+
+    <select id="selectRecentDays" resultMap="ApiMetricDailyMap">
+        SELECT *
+        FROM api_metric_daily
+        WHERE metric_date >= #{startDate}
+        ORDER BY metric_date DESC, category ASC, endpoint ASC
+    </select>
+</mapper>

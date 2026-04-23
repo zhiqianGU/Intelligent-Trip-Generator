@@ -1,8 +1,25 @@
+
 -- 建议先设定字符集
 use thesis_project;
 SET NAMES utf8mb4;
 SET SESSION sql_mode = 'STRICT_ALL_TABLES';
 
+CREATE TABLE user_refresh_token (
+                                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                    user_id BIGINT NOT NULL,
+                                    token_hash CHAR(64) NOT NULL,                  -- 存 refresh token 的 SHA-256/更强哈希，不存明文
+                                    device_info VARCHAR(255) NULL,                 -- 可选：浏览器/设备信息
+                                    ip_address VARCHAR(45) NULL,                   -- 可选：IPv4/IPv6
+                                    expires_at TIMESTAMP NOT NULL,
+                                    revoked_at TIMESTAMP NULL,
+                                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                    replaced_by_token_id BIGINT NULL,              -- 可选：token rotation 时指向新 token
+                                    CONSTRAINT fk_refresh_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE,
+                                    CONSTRAINT fk_refresh_replaced FOREIGN KEY (replaced_by_token_id) REFERENCES user_refresh_token(id) ON DELETE SET NULL,
+                                    UNIQUE KEY uk_refresh_token_hash (token_hash),
+                                    KEY idx_refresh_user (user_id),
+                                    KEY idx_refresh_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 -- 1) 用户主体
 CREATE TABLE app_user (
                           id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -43,13 +60,13 @@ CREATE TABLE place (
                        city VARCHAR(100),
                        district VARCHAR(100),
                        country VARCHAR(100),
-                       latitude  DECIMAL(9,6) NOT NULL,
-                       longitude DECIMAL(9,6) NOT NULL,
+                       latitude  DECIMAL(9,6) NULL,
+                       longitude DECIMAL(9,6) NULL,
     -- 注意：这里不写 SRID 4326
                        location POINT
                            GENERATED ALWAYS AS (
                                ST_GeomFromText(CONCAT('POINT(', longitude, ' ', latitude, ')'), 4326)
-                               ) STORED NOT NULL,
+                               ) STORED NULL,
                        source ENUM('OSM','USER','AMAP','OTHER') DEFAULT 'OSM',
                        external_ref VARCHAR(255),
                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -73,6 +90,11 @@ CREATE TABLE trip_plan (
                            CONSTRAINT fk_plan_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+ALTER TABLE trip_plan
+    ADD COLUMN favorite TINYINT(1) NOT NULL DEFAULT 0
+        AFTER pace;
+CREATE INDEX idx_plan_user_fav ON trip_plan(user_id, favorite);
+
 -- 5.1) 计划的风格标签（多选，3NF 用码表 + 关联）
 CREATE TABLE style_tag (
                            id TINYINT UNSIGNED PRIMARY KEY,
@@ -87,6 +109,14 @@ CREATE TABLE trip_plan_style (
                                  CONSTRAINT fk_ps_plan  FOREIGN KEY (plan_id)  REFERENCES trip_plan(id) ON DELETE CASCADE,
                                  CONSTRAINT fk_ps_style FOREIGN KEY (style_id) REFERENCES style_tag(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT INTO style_tag (id, code, name_zh) VALUES
+    (1, 'food', '美食'),
+    (2, 'museum', '博物馆'),
+    (3, 'nature', '自然'),
+    (4, 'shopping', '购物'),
+    (5, 'family', '亲子'),
+    (6, 'nightlife', '夜生活');
 
 -- 6) 行程的“天”（Day）——酒店引用 place；(plan_id, day_index) 唯一
 CREATE TABLE trip_day (
@@ -157,3 +187,15 @@ CREATE TABLE user_favorite_place (
                                      CONSTRAINT fk_fav_user  FOREIGN KEY (user_id)  REFERENCES app_user(id) ON DELETE CASCADE,
                                      CONSTRAINT fk_fav_place FOREIGN KEY (place_id) REFERENCES place(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE plan_draft_raw (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                plan_id BIGINT NULL,             -- 登录用户提交时，关联 trip_plan
+                                user_id BIGINT NULL,             -- 可空(游客)
+                                content MEDIUMTEXT NOT NULL,     -- 模型原文(JSON字符串)
+                                status ENUM('NEW','PARSED','MATERIALIZED','FAILED') NOT NULL DEFAULT 'NEW',
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                CONSTRAINT fk_draft_plan FOREIGN KEY (plan_id) REFERENCES trip_plan(id) ON DELETE SET NULL,
+                                CONSTRAINT fk_draft_user FOREIGN KEY (user_id) REFERENCES app_user(id) ON DELETE SET NULL
+);

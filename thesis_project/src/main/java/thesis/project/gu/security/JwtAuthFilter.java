@@ -29,31 +29,23 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                                     HttpServletResponse res,
                                     FilterChain chain)
             throws ServletException, IOException {
-
         String header = req.getHeader(HttpHeaders.AUTHORIZATION);
         if (StringUtils.hasText(header) && header.startsWith("Bearer ")) {
             String token = header.substring(7);
             try {
                 Claims claims = jwtUtil.parseClaims(token);
-                // 从 Claims 中取出你放进去的 userId/username
                 Long userId = claims.get("userId", Long.class);
-//                String username = claims.getSubject();
-                // 这里 role 列表可从 claims.get("roles", List.class)，如果有的话
                 UsernamePasswordAuthenticationToken auth =
-                        new UsernamePasswordAuthenticationToken(
-                                userId,
-                                null,
-                                List.of()  // 如果有角色，可以填入 GrantedAuthority 列表
-                        );
+                        new UsernamePasswordAuthenticationToken(userId, null, List.of());
                 auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(req));
                 SecurityContextHolder.getContext().setAuthentication(auth);
             } catch (Exception ex) {
-                // token 无效，直接让 Spring Security 继续到未认证逻辑
-                logger.warn("Invalid JWT: " + ex.getMessage());
-                res.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                return; // 不再进入后续链
+                // ⚠️ 关键点：不要写 401、不要 return；直接记录日志并“继续链条”
+                logger.warn("Invalid JWT: {}");
+                SecurityContextHolder.clearContext();
             }
         }
         chain.doFilter(req, res);
     }
+
 }

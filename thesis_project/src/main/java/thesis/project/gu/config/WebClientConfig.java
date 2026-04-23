@@ -32,6 +32,8 @@ public class WebClientConfig {
 
 
         return builder
+                .connectTimeout(Duration.ofSeconds(6))
+                .readTimeout(Duration.ofSeconds(12))
                 .build();
     }
 

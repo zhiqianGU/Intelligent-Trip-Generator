@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Backend/Data Evidence Dashboard</title>
+    <link rel="stylesheet" href="/css/analysis-dashboard.css?v=2026-04-17-01"/>
+</head>
+<body>
+<main class="page">
+    <section class="hero">
+        <div>
+            <p class="eyebrow">Backend/Data Evidence</p>
+            <h1>Backend performance evidence for itinerary generation APIs</h1>
+            <p class="intro">
+                This page separates controlled benchmark evidence, live runtime counters, and historical
+                persisted metrics. It is designed for thesis/demo discussion of heavy AI orchestration endpoints
+                such as <code>/draft</code> and <code>/raw</code>, and lighter supporting endpoints such as
+                <code>/route-suggestions</code>, route, geocode, and weather services.
+            </p>
+            <div class="hero-facts">
+                <span>Source: <code>scripts/load-test.ps1</code></span>
+                <span>Runtime: <code>/api/v1/analysis/metrics</code></span>
+                <span>Daily: <code>/api/v1/analysis/daily</code></span>
+            </div>
+        </div>
+        <div class="hero-actions">
+            <a class="ghost-link" href="/index.html">Home</a>
+            <a class="ghost-link" href="/map.html">Map</a>
+            <button id="refreshMetrics" class="primary" type="button">Refresh runtime</button>
+            <button id="clearDashboard" class="secondary danger-outline" type="button">Clear panel data</button>
+        </div>
+    </section>
+
+    <section class="evidence-strip">
+        <article class="metric-card">
+            <span class="label">Stress log</span>
+            <strong id="stressLogName">embedded latest run</strong>
+            <span class="subtle" id="stressLogMeta">Waiting for benchmark data</span>
+        </article>
+        <article class="metric-card">
+            <span class="label">Mean latency reduction</span>
+            <strong id="overallLatencyReduction">0%</strong>
+            <span class="subtle">A optimized condition vs B standard baseline.</span>
+        </article>
+        <article class="metric-card">
+            <span class="label">Service-rate gain</span>
+            <strong id="overallThroughputGain">0x</strong>
+            <span class="subtle">Uses measured service rate when available; otherwise a latency-derived proxy.</span>
+        </article>
+        <article class="metric-card">
+            <span class="label">Success rate</span>
+            <strong id="overallSuccessRate">0%</strong>
+            <span class="subtle">Across cold and warm benchmark phases.</span>
+        </article>
+    </section>
+
+    <section class="section-band benchmark-band">
+        <div>
+            <p class="eyebrow">Controlled benchmark evidence</p>
+            <h2>Stress-test comparison</h2>
+        </div>
+        <span>Input: generated benchmark JSON logs</span>
+    </section>
+
+    <section class="panel control-panel">
+        <div>
+            <p class="eyebrow">Bring the logs</p>
+            <h2>Load a stress-test JSON file</h2>
+            <p class="panel-copy">
+                Use the generated output from <code>scripts/results/load-test-*.json</code>. The dashboard
+                reads <code>cold</code>, <code>warm</code>, and <code>comparison</code> sections, then renders
+                API latency distribution, service-rate, and reliability comparisons. Optional percentile fields
+                are displayed when present.
+            </p>
+        </div>
+        <div class="file-tools">
+            <label class="file-picker">
+                <input id="stressLogFile" type="file" accept="application/json,.json"/>
+                Choose stress-test log
+            </label>
+            <button id="useEmbeddedLog" class="secondary" type="button">Use embedded run</button>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <p class="eyebrow">Benchmark metadata</p>
+                <h2>Log quality and experimental setup</h2>
+            </div>
+            <span id="metadataQualityBadge" class="badge neutral">not evaluated</span>
+        </div>
+        <div id="benchmarkMetadata" class="metadata-grid">
+            <div class="setup-card"><span class="label">AI mode</span><p>AI mode not reported</p></div>
+            <div class="setup-card"><span class="label">Concurrency</span><p>not reported in current log</p></div>
+            <div class="setup-card"><span class="label">Duration</span><p>not reported in current log</p></div>
+            <div class="setup-card"><span class="label">Percentiles</span><p>not reported in current log</p></div>
+        </div>
+    </section>
+
+    <section class="panel baseline-panel">
+        <div class="panel-head">
+            <div>
+                <p class="eyebrow">Benchmark setup and baseline definition</p>
+                <h2>What A and B mean</h2>
+            </div>
+        </div>
+        <div class="setup-grid">
+            <div class="setup-card baseline">
+                <span class="label">B. Standard baseline</span>
+                <p>Cold execution before useful cache reuse. Repeated geocode, route, and AI-generation work is treated as a direct backend/external-service path.</p>
+            </div>
+            <div class="setup-card optimized">
+                <span class="label">A. Optimized backend</span>
+                <p>Warm execution with Redis cache, persisted place/geocode reuse, route prewarm, parallel route calls, and route fallback behavior.</p>
+            </div>
+            <div class="setup-card">
+                <span class="label">Interpretation rule</span>
+                <p>Percentiles and measured service rate are preferred. When logs only contain averages, the dashboard marks service rate as a latency-derived proxy.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel endpoint-focus">
+        <div class="panel-head">
+            <div>
+                <p class="eyebrow">Critical endpoint focus</p>
+                <h2>Heavy orchestration vs supporting services</h2>
+            </div>
+        </div>
+        <div class="endpoint-grid">
+            <div class="endpoint-card heavy">
+                <strong>/draft</strong>
+                <span>Critical target for richer logs. Heavy AI itinerary pipeline: raw generation, verification, route-aware scheduling, validation, retry, copy polish.</span>
+            </div>
+            <div class="endpoint-card heavy">
+                <strong>/raw</strong>
+                <span>Critical target for richer logs. Heavy generation plus authenticated persistence path when a user is logged in.</span>
+            </div>
+            <div class="endpoint-card medium">
+                <strong>/route-suggestions</strong>
+                <span>Critical target for richer logs. Route recommendation and segment comparison based on generated itinerary stops.</span>
+            </div>
+            <div class="endpoint-card light">
+                <strong>route / geocode / weather</strong>
+                <span>Supporting map and context services; useful for cache, fallback, and external API load evaluation.</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="chart-grid">
+        <article class="panel chart-panel">
+            <div class="panel-head">
+                <div>
+                    <p class="eyebrow">API latency graph</p>
+                    <h2>Latency distribution by endpoint</h2>
+                </div>
+                <span class="badge">Avg + optional P50/P95/P99</span>
+            </div>
+            <div id="latencyChart" class="bar-chart" aria-label="Latency chart"></div>
+        </article>
+
+        <article class="panel chart-panel">
+            <div class="panel-head">
+                <div>
+                    <p class="eyebrow">Service-rate comparison</p>
+                    <h2>Measured service rate or latency-derived proxy</h2>
+                </div>
+                <span class="badge green" id="throughputMethodBadge">Proxy when logs lack measured service rate</span>
+            </div>
+            <div id="throughputChart" class="bar-chart" aria-label="Service-rate chart"></div>
+        </article>
+    </section>
+
+    <section class="chart-grid">
+        <article class="panel chart-panel">
+            <div class="panel-head">
+                <div>
+                    <p class="eyebrow">Concurrency stress-test</p>
+                    <h2>Latency vs concurrency</h2>
+                </div>
+                <span class="badge neutral">Optional benchmark field</span>
+            </div>
+            <div id="latencyConcurrencyChart" class="bar-chart empty-chart">not reported in current log</div>
+        </article>
+
+        <article class="panel chart-panel">
+            <div class="panel-head">
+                <div>
+                    <p class="eyebrow">Concurrency stress-test</p>
+                    <h2>Service rate vs concurrency</h2>
+                </div>
+                <span class="badge neutral">Optional benchmark field</span>
+            </div>
+            <div id="serviceRateConcurrencyChart" class="bar-chart empty-chart">not reported in current log</div>
+        </article>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <p class="eyebrow">A vs B summary</p>
+                <h2>Benchmark comparison from stress-test logs</h2>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Endpoint</th>
+                    <th>Class</th>
+                    <th>B latency</th>
+                    <th>A latency</th>
+                    <th>Tail latency</th>
+                    <th>Latency reduction</th>
+                    <th>B service rate</th>
+                    <th>A service rate</th>
+                    <th>Requests</th>
+                    <th>Success / failure</th>
+                    <th>Status</th>
+                </tr>
+                </thead>
+                <tbody id="benchmarkBody">
+                <tr><td colspan="10">Loading benchmark data...</td></tr>
+                </tbody>
+            </table>
+            <div id="benchmarkCoverageNote" class="coverage-note"></div>
+        </div>
+    </section>
+
+    <section class="section-band runtime-band">
+        <div>
+            <p class="eyebrow">Runtime evidence</p>
+            <h2>Live backend counters</h2>
+        </div>
+        <span>Input: <code>/api/v1/analysis/metrics</code></span>
+    </section>
+
+    <section class="comparison-grid">
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <p class="eyebrow">Runtime A vs B</p>
+                    <h2>Geocode external API load</h2>
+                </div>
+                <div id="geocodeReduction" class="badge">0%</div>
+            </div>
+            <div class="ab-grid">
+                <div class="ab-card">
+                    <span class="label">A. Optimized actual</span>
+                    <strong id="geocodeActualCalls">0</strong>
+                    <span class="subtle">External geocode calls actually made.</span>
+                </div>
+                <div class="ab-card">
+                    <span class="label">B. Baseline estimate</span>
+                    <strong id="geocodeBaselineCalls">0</strong>
+                    <span class="subtle">If cache and DB reuse did not intercept requests.</span>
+                </div>
+            </div>
+            <div class="bar-wrap">
+                <div class="bar-label">
+                    <span>External call reduction</span>
+                    <span id="geocodeSavedCalls">0 saved calls</span>
+                </div>
+                <div class="bar-track">
+                    <div id="geocodeReductionBar" class="bar-fill"></div>
+                </div>
+            </div>
+            <div class="mini-stats">
+                <div><span>Redis hit rate</span><strong id="geocodeRedisRate">0%</strong></div>
+                <div><span>DB hit rate</span><strong id="geocodeDbRate">0%</strong></div>
+                <div><span>Endpoint avg</span><strong id="geocodeEndpointMs">0 ms</strong></div>
+                <div><span>External avg</span><strong id="geocodeExternalMs">0 ms</strong></div>
+            </div>
+        </article>
+
+        <article class="panel">
+            <div class="panel-head">
+                <div>
+                    <p class="eyebrow">Runtime A vs B</p>
+                    <h2>Route external API load</h2>
+                </div>
+                <div id="routeReduction" class="badge">0%</div>
+            </div>
+            <div class="ab-grid">
+                <div class="ab-card">
+                    <span class="label">A. Optimized actual</span>
+                    <strong id="routeActualCalls">0</strong>
+                    <span class="subtle">External route calls actually made.</span>
+                </div>
+                <div class="ab-card">
+                    <span class="label">B. Baseline estimate</span>
+                    <strong id="routeBaselineCalls">0</strong>
+                    <span class="subtle">If each route request bypassed Redis.</span>
+                </div>
+            </div>
+            <div class="bar-wrap">
+                <div class="bar-label">
+                    <span>External call reduction</span>
+                    <span id="routeSavedCalls">0 saved calls</span>
+                </div>
+                <div class="bar-track">
+                    <div id="routeReductionBar" class="bar-fill green-fill"></div>
+                </div>
+            </div>
+            <div class="mini-stats">
+                <div><span>Redis hit rate</span><strong id="routeRedisRate">0%</strong></div>
+                <div><span>Failures</span><strong id="routeFailures">0</strong></div>
+                <div><span>Endpoint avg</span><strong id="routeEndpointMs">0 ms</strong></div>
+                <div><span>External avg</span><strong id="routeExternalMs">0 ms</strong></div>
+            </div>
+        </article>
+    </section>
+
+    <section class="section-band history-band">
+        <div>
+            <p class="eyebrow">Historical persistence</p>
+            <h2>Daily aggregate rows</h2>
+        </div>
+        <span>Input: <code>api_metric_daily</code></span>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <p class="eyebrow">Runtime counters</p>
+                <h2>Current backend snapshot</h2>
+            </div>
+            <span id="capturedAt" class="badge neutral">not loaded</span>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-card">
+                <h3>Plan generation</h3>
+                <ul>
+                    <li>Requests: <strong id="planGenerateRequests">0</strong></li>
+                    <li>Redis hits: <strong id="planGenerateRedisHits">0</strong></li>
+                    <li>External AI calls: <strong id="planGenerateExternalCalls">0</strong></li>
+                    <li>Failures: <strong id="planGenerateFailures">0</strong></li>
+                    <li>Endpoint avg: <strong id="planGenerateEndpointMs">0 ms</strong></li>
+                    <li>Model avg: <strong id="planGenerateExternalMs">0 ms</strong></li>
+                </ul>
+            </div>
+            <div class="detail-card">
+                <h3>Route execution</h3>
+                <ul>
+                    <li>Total requests: <strong id="routeRequests">0</strong></li>
+                    <li>Redis hits: <strong id="routeRedisHits">0</strong></li>
+                    <li>External calls: <strong id="routeExternalCalls">0</strong></li>
+                    <li>Parallel wall avg: <strong id="routeParallelWallMs">0 ms</strong></li>
+                    <li>Serial estimate avg: <strong id="routeSerialEstimateMs">0 ms</strong></li>
+                    <li>Saved by parallelism: <strong id="routeParallelSavedMs">0 ms</strong></li>
+                </ul>
+            </div>
+            <div class="detail-card">
+                <h3>Prewarm and fallback</h3>
+                <ul>
+                    <li>Prewarm runs: <strong id="planPrewarmRequests">0</strong></li>
+                    <li>Prewarm route calls: <strong id="planPrewarmRouteCalls">0</strong></li>
+                    <li>Transit to walk fallback: <strong id="routeTransitFallbacks">0</strong></li>
+                    <li>Direct line fallback: <strong id="routeDirectFallbacks">0</strong></li>
+                    <li>Plan views: <strong id="planViewRequests">0</strong></li>
+                    <li>Plan view avg: <strong id="planViewMs">0 ms</strong></li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head">
+            <div>
+                <p class="eyebrow">Daily persistence</p>
+                <h2>Recent API metric rows</h2>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>Endpoint</th>
+                    <th>Requests</th>
+                    <th>Redis hits</th>
+                    <th>DB hits</th>
+                    <th>External calls</th>
+                    <th>Failures</th>
+                    <th>Avg latency</th>
+                    <th>P95 latency</th>
+                    <th>P99 latency</th>
+                    <th>Total latency</th>
+                </tr>
+                </thead>
+                <tbody id="dailyMetricsBody">
+                <tr><td colspan="12">Loading daily metrics...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="panel explanation">
+        <p class="eyebrow">How to present it</p>
+        <h2>Backend/Data narrative</h2>
+        <div class="notes">
+            <p>
+                The stress-test log provides the controlled A/B evidence: B is the cold baseline and A is the warm
+                optimized path after caches, persisted geocode data, and route reuse are available.
+            </p>
+            <p>
+                Runtime counters show whether the same optimization holds during normal use: external API calls are
+                compared against a standard baseline estimate, and latency savings are calculated from measured
+                request timing rather than hand-written values.
+            </p>
+            <p>
+                Service rate should ideally come from measured benchmark duration and concurrency. If a log does not
+                include those fields, this dashboard explicitly labels the value as a latency-derived proxy, not as a
+                measured load-test service rate.
+            </p>
+        </div>
+    </section>
+</main>
+
+<script>
+const embeddedStressLog = {
+  generated_at: '2026-04-07T16:17:08',
+  iterations: 20,
+  scenarios: [
+    { id: 'melbourne_market' },
+    { id: 'sydney_harbour' },
+    { id: 'brisbane_culture' }
+  ],
+  comparison: {
+    byApi: [
+      { name: 'geocode', cold_avg_latency_ms: 68.12, warm_avg_latency_ms: 7.82, improvement_pct: 88.52, cold_failures: 0, warm_failures: 0 },
+      { name: 'plan_draft', cold_avg_latency_ms: 996.06, warm_avg_latency_ms: 7.86, improvement_pct: 99.21, cold_failures: 0, warm_failures: 0 },
+      { name: 'route', cold_avg_latency_ms: 100.67, warm_avg_latency_ms: 9.03, improvement_pct: 91.03, cold_failures: 0, warm_failures: 0 }
+    ]
+  },
+  cold: {
+    byApi: [
+      { name: 'geocode', requests: 60, success: 60, failures: 0, avg_latency_ms: 68.12 },
+      { name: 'plan_draft', requests: 60, success: 60, failures: 0, avg_latency_ms: 996.06 },
+      { name: 'route', requests: 60, success: 60, failures: 0, avg_latency_ms: 100.67 }
+    ]
+  },
+  warm: {
+    byApi: [
+      { name: 'geocode', requests: 60, success: 60, failures: 0, avg_latency_ms: 7.82 },
+      { name: 'plan_draft', requests: 60, success: 60, failures: 0, avg_latency_ms: 7.86 },
+      { name: 'route', requests: 60, success: 60, failures: 0, avg_latency_ms: 9.03 }
+    ]
+  }
+};
+
+const formatNumber = (value) => Number(value || 0).toLocaleString();
+const formatMs = (value) => `${Math.round(Number(value || 0))} ms`;
+const formatPct = (value) => `${Number(value || 0).toFixed(1)}%`;
+const formatTime = (value) => value ? new Date(value).toLocaleString() : '-';
+const throughput = (latencyMs) => Number(latencyMs || 0) > 0 ? 1000 / Number(latencyMs) : 0;
+const endpointAliases = {
+  plan_draft: '/draft',
+  draft: '/draft',
+  plan_raw: '/raw',
+  raw: '/raw',
+  route_suggestions: '/route-suggestions',
+  routeSuggestions: '/route-suggestions'
+};
+const criticalEndpointOrder = ['/draft', '/raw', '/route-suggestions'];
+
+function setText(id, value) {
+  const node = document.getElementById(id);
+  if (node) node.textContent = value;
+}
+
+function setWidth(id, value) {
+  const node = document.getElementById(id);
+  if (node) node.style.width = `${Math.max(0, Math.min(100, Number(value || 0)))}%`;
+}
+
+function resetReductionBars() {
+  setWidth('geocodeReductionBar', 0);
+  setWidth('routeReductionBar', 0);
+}
+
+function clearDashboardData() {
+  [
+    ['stressLogName', 'cleared'],
+    ['stressLogMeta', 'No stress-test log loaded'],
+    ['overallLatencyReduction', '-'],
+    ['overallThroughputGain', '-'],
+    ['overallSuccessRate', '-'],
+    ['metadataQualityBadge', 'cleared'],
+    ['throughputMethodBadge', 'No benchmark loaded'],
+    ['benchmarkCoverageNote', 'No benchmark log loaded. Upload a stress-test JSON or use the embedded run.'],
+    ['capturedAt', 'not loaded'],
+    ['geocodeReduction', '-'],
+    ['geocodeActualCalls', '-'],
+    ['geocodeBaselineCalls', '-'],
+    ['geocodeSavedCalls', '-'],
+    ['geocodeRedisRate', '-'],
+    ['geocodeDbRate', '-'],
+    ['geocodeEndpointMs', '-'],
+    ['geocodeExternalMs', '-'],
+    ['routeReduction', '-'],
+    ['routeActualCalls', '-'],
+    ['routeBaselineCalls', '-'],
+    ['routeSavedCalls', '-'],
+    ['routeRedisRate', '-'],
+    ['routeFailures', '-'],
+    ['routeEndpointMs', '-'],
+    ['routeExternalMs', '-'],
+    ['routeRequests', '-'],
+    ['routeRedisHits', '-'],
+    ['routeExternalCalls', '-'],
+    ['routeTransitFallbacks', '-'],
+    ['routeDirectFallbacks', '-'],
+    ['routeParallelWallMs', '-'],
+    ['routeSerialEstimateMs', '-'],
+    ['routeParallelSavedMs', '-'],
+    ['planGenerateRequests', '-'],
+    ['planGenerateRedisHits', '-'],
+    ['planGenerateExternalCalls', '-'],
+    ['planGenerateFailures', '-'],
+    ['planGenerateEndpointMs', '-'],
+    ['planGenerateExternalMs', '-'],
+    ['planViewRequests', '-'],
+    ['planViewMs', '-'],
+    ['planPrewarmRequests', '-'],
+    ['planPrewarmRouteCalls', '-']
+  ].forEach(([id, value]) => setText(id, value));
+
+  document.getElementById('benchmarkMetadata').innerHTML = `
+    <div class="setup-card"><span class="label">AI mode</span><p>AI mode not reported</p></div>
+    <div class="setup-card"><span class="label">Concurrency</span><p>not reported in current log</p></div>
+    <div class="setup-card"><span class="label">Duration</span><p>not reported in current log</p></div>
+    <div class="setup-card"><span class="label">Percentiles</span><p>not reported in current log</p></div>
+  `;
+  document.getElementById('latencyChart').innerHTML = '<div class="empty-chart">No benchmark log loaded</div>';
+  document.getElementById('throughputChart').innerHTML = '<div class="empty-chart">No benchmark log loaded</div>';
+  document.getElementById('latencyConcurrencyChart').classList.add('empty-chart');
+  document.getElementById('serviceRateConcurrencyChart').classList.add('empty-chart');
+  document.getElementById('latencyConcurrencyChart').textContent = 'not reported in current log';
+  document.getElementById('serviceRateConcurrencyChart').textContent = 'not reported in current log';
+  document.getElementById('benchmarkBody').innerHTML = '<tr><td colspan="10">No benchmark log loaded</td></tr>';
+  document.getElementById('dailyMetricsBody').innerHTML = '<tr><td colspan="12">No daily metrics loaded</td></tr>';
+  document.getElementById('stressLogFile').value = '';
+  resetReductionBars();
+}
+
+function firstNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number) && number > 0) return number;
+  }
+  return 0;
+}
+
+function canonicalEndpoint(name) {
+  if (!name) return '-';
+  const normalized = String(name).trim();
+  return endpointAliases[normalized] || normalized;
+}
+
+function endpointClass(name) {
+  const endpoint = canonicalEndpoint(name);
+  if (endpoint === '/draft' || endpoint === '/raw') return 'Heavy AI orchestration';
+  if (endpoint === '/route-suggestions') return 'Route recommendation';
+  if (endpoint.includes('route')) return 'Map route service';
+  if (endpoint.includes('geocode')) return 'Map geocode service';
+  if (endpoint.includes('weather')) return 'Weather service';
+  return 'Supporting API';
+}
+
+function percentileSummary(prefix, row) {
+  const p50 = row[`${prefix}P50`];
+  const p95 = row[`${prefix}P95`];
+  const p99 = row[`${prefix}P99`];
+  const parts = [];
+  if (p50) parts.push(`P50 ${formatMs(p50)}`);
+  if (p95) parts.push(`P95 ${formatMs(p95)}`);
+  if (p99) parts.push(`P99 ${formatMs(p99)}`);
+  return parts.length ? parts.join(' | ') : 'percentiles not reported';
+}
+
+function optionalMs(...values) {
+  const value = firstNumber(...values);
+  return value ? formatMs(value) : 'not reported';
+}
+
+function optionalValue(value, suffix = '') {
+  return value || value === 0 ? `${value}${suffix}` : 'not reported in current log';
+}
+
+function classifyHealth(row) {
+  const failures = Number(row.coldFailures || 0) + Number(row.warmFailures || 0);
+  if (failures > 0) return { label: 'Review', className: 'warn' };
+  if (row.optimizedP95 && row.optimizedLatency && row.optimizedP95 > row.optimizedLatency * 3) {
+    return { label: 'Tail risk', className: 'warn' };
+  }
+  return { label: 'OK', className: 'ok' };
+}
+
+function hasPercentileMetrics(log) {
+  const rows = [
+    ...(log?.comparison?.byApi || []),
+    ...(log?.cold?.byApi || []),
+    ...(log?.warm?.byApi || [])
+  ];
+  return rows.some(row => firstNumber(
+    row.p50_latency_ms,
+    row.p95_latency_ms,
+    row.p99_latency_ms,
+    row.cold_p95_latency_ms,
+    row.warm_p95_latency_ms,
+    row.latency_p95_ms
+  ));
+}
+
+function extractBenchmarkMetadata(log, rows) {
+  const aiMode = normalizeAiMode(log?.metadata?.ai_mode || log?.metadata?.aiMode || log?.ai_mode || log?.aiMode);
+  const concurrency = firstNumber(
+    log?.concurrency,
+    log?.max_concurrency,
+    log?.benchmark?.concurrency,
+    log?.metadata?.concurrency
+  );
+  const durationSeconds = firstNumber(
+    log?.duration_seconds,
+    log?.durationSeconds,
+    log?.benchmark?.duration_seconds,
+    log?.metadata?.duration_seconds
+  );
+  const requestsPerScenario = firstNumber(
+    log?.requests_per_scenario,
+    log?.requestsPerScenario,
+    log?.iterations
+  );
+  const warmupPolicy = log?.warmup_policy
+    || log?.warmupPolicy
+    || log?.benchmark?.warmup_policy
+    || log?.metadata?.warmup_policy
+    || null;
+  const percentileAvailable = hasPercentileMetrics(log);
+  const measuredServiceRate = rows.some(row => row.throughputMethod === 'measured');
+  return {
+    aiMode,
+    concurrency,
+    durationSeconds,
+    requestsPerScenario,
+    warmupPolicy,
+    percentileAvailable,
+    measuredServiceRate
+  };
+}
+
+function normalizeAiMode(value) {
+  if (!value || typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'mock') return 'mock backend-only benchmark';
+  if (normalized === 'real') return 'real end-to-end benchmark';
+  return `${normalized} benchmark`;
+}
+
+function renderBenchmarkMetadata(log, rows) {
+  const metadata = extractBenchmarkMetadata(log, rows);
+  const missing = [
+    metadata.concurrency ? null : 'concurrency',
+    metadata.durationSeconds ? null : 'duration',
+    metadata.percentileAvailable ? null : 'percentiles',
+    metadata.measuredServiceRate ? null : 'measured service rate'
+  ].filter(Boolean);
+  setText('metadataQualityBadge', missing.length ? `Missing: ${missing.join(', ')}` : 'Rich benchmark log');
+
+  document.getElementById('benchmarkMetadata').innerHTML = `
+    <div class="setup-card"><span class="label">AI mode</span><p>${metadata.aiMode ? `AI mode: ${metadata.aiMode}` : 'AI mode not reported'}</p></div>
+    <div class="setup-card"><span class="label">Concurrency</span><p>${optionalValue(metadata.concurrency)}</p></div>
+    <div class="setup-card"><span class="label">Duration</span><p>${metadata.durationSeconds ? `${metadata.durationSeconds}s` : 'not reported in current log'}</p></div>
+    <div class="setup-card"><span class="label">Warmup policy</span><p>${metadata.warmupPolicy || 'not reported in current log'}</p></div>
+    <div class="setup-card"><span class="label">Requests per scenario</span><p>${optionalValue(metadata.requestsPerScenario)}</p></div>
+    <div class="setup-card"><span class="label">Percentile metrics</span><p>${metadata.percentileAvailable ? 'available' : 'not reported in current log'}</p></div>
+    <div class="setup-card"><span class="label">Service-rate source</span><p>${metadata.measuredServiceRate ? 'measured service-rate fields available' : 'latency-derived proxy only'}</p></div>
+  `;
+}
+
+function mapConcurrencyRows(rows, groupLabel) {
+  return rows.map(row => ({
+    name: canonicalEndpoint(row.name || row.endpoint || '-'),
+    groupLabel,
+    concurrency: firstNumber(row.concurrency, row.users, row.threads, row.parallelism),
+    avgLatency: firstNumber(row.avg_latency_ms, row.average_latency_ms, row.latency_ms),
+    p95Latency: firstNumber(row.p95_latency_ms, row.p95_ms, row.latency_p95_ms),
+    serviceRate: firstNumber(row.throughput_rps, row.requests_per_second, row.service_rate_rps)
+  })).filter(row => row.concurrency);
+}
+
+function extractConcurrencyRows(log) {
+  const candidates = log?.concurrency
+    || log?.concurrencyBreakdown
+    || log?.concurrency_breakdown
+    || log?.benchmark?.concurrency
+    || log?.metadata?.concurrency_breakdown
+    || [];
+  const rows = Array.isArray(candidates) ? candidates : [];
+  return mapConcurrencyRows(rows, 'light supporting endpoints');
+}
+
+function extractHeavyConcurrencyRows(log) {
+  const candidates = log?.heavyConcurrencyBreakdown
+    || log?.heavy_concurrency_breakdown
+    || log?.benchmark?.heavyConcurrencyBreakdown
+    || log?.metadata?.heavy_concurrency_breakdown
+    || [];
+  const rows = Array.isArray(candidates) ? candidates : [];
+  return mapConcurrencyRows(rows, 'heavy AI orchestration endpoints');
+}
+
+function renderConcurrencyCharts(log) {
+  const rows = [
+    ...extractConcurrencyRows(log),
+    ...extractHeavyConcurrencyRows(log)
+  ].sort((a, b) => {
+    if (a.groupLabel !== b.groupLabel) return a.groupLabel.localeCompare(b.groupLabel);
+    if (a.name !== b.name) return a.name.localeCompare(b.name);
+    return a.concurrency - b.concurrency;
+  });
+  const latencyNode = document.getElementById('latencyConcurrencyChart');
+  const serviceNode = document.getElementById('serviceRateConcurrencyChart');
+  if (!rows.length) {
+    latencyNode.classList.add('empty-chart');
+    serviceNode.classList.add('empty-chart');
+    latencyNode.textContent = 'not reported in current log';
+    serviceNode.textContent = 'not reported in current log';
+    return;
+  }
+
+  latencyNode.classList.remove('empty-chart');
+  serviceNode.classList.remove('empty-chart');
+  const maxLatency = Math.max(...rows.map(row => row.p95Latency || row.avgLatency || 0), 1);
+  const maxRate = Math.max(...rows.map(row => row.serviceRate || 0), 1);
+
+  latencyNode.innerHTML = rows.map(row => {
+    const value = row.p95Latency || row.avgLatency;
+    return `
+      <div class="chart-row">
+        <div class="chart-label">
+          <strong>${row.name} @ ${row.concurrency}</strong>
+          <span>${row.groupLabel}</span>
+        </div>
+        <div class="chart-bars">
+          <div class="chart-line">
+            <span class="series-label">${row.p95Latency ? 'P95 latency' : 'avg latency'}</span>
+            <div class="chart-track"><div class="chart-fill baseline" style="width:${Math.max(4, value / maxLatency * 100)}%"></div></div>
+            <strong>${formatMs(value)}</strong>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  serviceNode.innerHTML = rows.map(row => `
+    <div class="chart-row">
+      <div class="chart-label">
+        <strong>${row.name} @ ${row.concurrency}</strong>
+        <span>${row.groupLabel}</span>
+      </div>
+      <div class="chart-bars">
+        <div class="chart-line">
+          <span class="series-label">service rate</span>
+          <div class="chart-track"><div class="chart-fill optimized" style="width:${Math.max(4, row.serviceRate / maxRate * 100)}%"></div></div>
+          <strong>${row.serviceRate ? `${row.serviceRate.toFixed(1)} req/s` : 'not reported'}</strong>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function normalizeBenchmark(log) {
+  const comparisonRows = log?.comparison?.byApi || [];
+  const coldRows = log?.cold?.byApi || [];
+  const warmRows = log?.warm?.byApi || [];
+  const byName = new Map();
+
+  comparisonRows.forEach(row => {
+    const key = canonicalEndpoint(row.name);
+    byName.set(key, {
+      name: key,
+      baselineLatency: Number(row.cold_avg_latency_ms || 0),
+      optimizedLatency: Number(row.warm_avg_latency_ms || 0),
+      baselineP50: firstNumber(row.cold_p50_latency_ms, row.cold_p50_ms, row.cold_latency_p50_ms),
+      baselineP95: firstNumber(row.cold_p95_latency_ms, row.cold_p95_ms, row.cold_latency_p95_ms),
+      baselineP99: firstNumber(row.cold_p99_latency_ms, row.cold_p99_ms, row.cold_latency_p99_ms),
+      optimizedP50: firstNumber(row.warm_p50_latency_ms, row.warm_p50_ms, row.warm_latency_p50_ms),
+      optimizedP95: firstNumber(row.warm_p95_latency_ms, row.warm_p95_ms, row.warm_latency_p95_ms),
+      optimizedP99: firstNumber(row.warm_p99_latency_ms, row.warm_p99_ms, row.warm_latency_p99_ms),
+      baselineThroughputReported: firstNumber(row.cold_throughput_rps, row.cold_requests_per_second, row.baseline_throughput_rps),
+      optimizedThroughputReported: firstNumber(row.warm_throughput_rps, row.warm_requests_per_second, row.optimized_throughput_rps),
+      improvementPct: Number(row.improvement_pct || 0),
+      coldFailures: Number(row.cold_failures || 0),
+      warmFailures: Number(row.warm_failures || 0)
+    });
+  });
+
+  coldRows.forEach(row => {
+    const key = canonicalEndpoint(row.name);
+    const current = byName.get(key) || { name: key };
+    current.baselineLatency = Number(current.baselineLatency || row.avg_latency_ms || 0);
+    current.baselineP50 = firstNumber(current.baselineP50, row.p50_latency_ms, row.p50_ms, row.latency_p50_ms);
+    current.baselineP95 = firstNumber(current.baselineP95, row.p95_latency_ms, row.p95_ms, row.latency_p95_ms);
+    current.baselineP99 = firstNumber(current.baselineP99, row.p99_latency_ms, row.p99_ms, row.latency_p99_ms);
+    current.baselineThroughputReported = firstNumber(current.baselineThroughputReported, row.throughput_rps, row.requests_per_second);
+    current.baselineRequests = Number(row.requests || 0);
+    current.baselineSuccess = Number(row.success || 0);
+    current.coldFailures = Number(current.coldFailures || row.failures || 0);
+    byName.set(key, current);
+  });
+
+  warmRows.forEach(row => {
+    const key = canonicalEndpoint(row.name);
+    const current = byName.get(key) || { name: key };
+    current.optimizedLatency = Number(current.optimizedLatency || row.avg_latency_ms || 0);
+    current.optimizedP50 = firstNumber(current.optimizedP50, row.p50_latency_ms, row.p50_ms, row.latency_p50_ms);
+    current.optimizedP95 = firstNumber(current.optimizedP95, row.p95_latency_ms, row.p95_ms, row.latency_p95_ms);
+    current.optimizedP99 = firstNumber(current.optimizedP99, row.p99_latency_ms, row.p99_ms, row.latency_p99_ms);
+    current.optimizedThroughputReported = firstNumber(current.optimizedThroughputReported, row.throughput_rps, row.requests_per_second);
+    current.optimizedRequests = Number(row.requests || 0);
+    current.optimizedSuccess = Number(row.success || 0);
+    current.warmFailures = Number(current.warmFailures || row.failures || 0);
+    byName.set(key, current);
+  });
+
+  return [...byName.values()]
+    .filter(row => row.name && row.baselineLatency && row.optimizedLatency)
+    .map(row => ({
+      ...row,
+      improvementPct: row.improvementPct || ((row.baselineLatency - row.optimizedLatency) / row.baselineLatency * 100),
+      endpointClass: endpointClass(row.name),
+      baselineThroughput: row.baselineThroughputReported || throughput(row.baselineLatency),
+      optimizedThroughput: row.optimizedThroughputReported || throughput(row.optimizedLatency),
+      throughputMethod: row.baselineThroughputReported && row.optimizedThroughputReported ? 'measured' : 'latency proxy',
+      throughputGain: (row.optimizedThroughputReported || throughput(row.optimizedLatency))
+        / Math.max((row.baselineThroughputReported || throughput(row.baselineLatency)), 0.0001)
+    }))
+    .sort((a, b) => {
+      const ai = criticalEndpointOrder.indexOf(a.name);
+      const bi = criticalEndpointOrder.indexOf(b.name);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      return a.name.localeCompare(b.name);
+    });
+}
+
+function renderBarChart(containerId, rows, metric) {
+  const container = document.getElementById(containerId);
+  const max = Math.max(...rows.flatMap(row => [
+    metric === 'latency' ? row.baselineLatency : row.baselineThroughput,
+    metric === 'latency' ? row.optimizedLatency : row.optimizedThroughput
+  ]), 1);
+
+  container.innerHTML = rows.map(row => {
+    const baselineValue = metric === 'latency' ? row.baselineLatency : row.baselineThroughput;
+    const optimizedValue = metric === 'latency' ? row.optimizedLatency : row.optimizedThroughput;
+    const baselineLabel = metric === 'latency' ? formatMs(baselineValue) : `${baselineValue.toFixed(1)} req/s`;
+    const optimizedLabel = metric === 'latency' ? formatMs(optimizedValue) : `${optimizedValue.toFixed(1)} req/s`;
+    const baselineWidth = Math.max(4, baselineValue / max * 100);
+    const optimizedWidth = Math.max(4, optimizedValue / max * 100);
+    return `
+      <div class="chart-row">
+        <div class="chart-label">
+          <strong>${row.name}</strong>
+          <span>${row.endpointClass}</span>
+        </div>
+        <div class="chart-bars">
+          <div class="chart-line">
+            <span class="series-label">B baseline</span>
+            <div class="chart-track"><div class="chart-fill baseline" style="width:${baselineWidth}%"></div></div>
+            <strong>${baselineLabel}</strong>
+          </div>
+          <div class="chart-line">
+            <span class="series-label">A optimized</span>
+            <div class="chart-track"><div class="chart-fill optimized" style="width:${optimizedWidth}%"></div></div>
+            <strong>${optimizedLabel}</strong>
+          </div>
+          ${metric === 'latency' ? `<div class="percentile-line">${percentileSummary('optimized', row)}</div>` : `<div class="percentile-line">${row.throughputMethod}</div>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderBenchmark(log, label) {
+  const rows = normalizeBenchmark(log);
+  const totalRequests = ['cold', 'warm'].reduce((sum, phase) => {
+    return sum + (log?.[phase]?.byApi || []).reduce((phaseSum, row) => phaseSum + Number(row.requests || 0), 0);
+  }, 0);
+  const totalSuccess = ['cold', 'warm'].reduce((sum, phase) => {
+    return sum + (log?.[phase]?.byApi || []).reduce((phaseSum, row) => phaseSum + Number(row.success || 0), 0);
+  }, 0);
+  const meanImprovement = rows.length ? rows.reduce((sum, row) => sum + row.improvementPct, 0) / rows.length : 0;
+  const meanThroughputGain = rows.length ? rows.reduce((sum, row) => sum + row.throughputGain, 0) / rows.length : 0;
+  const usesMeasuredThroughput = rows.some(row => row.throughputMethod === 'measured');
+  const scenarioCount = Array.isArray(log?.scenarios) ? log.scenarios.length : 0;
+
+  setText('stressLogName', label);
+  setText('stressLogMeta', `${formatTime(log?.generated_at)} | ${formatNumber(log?.iterations)} iterations | ${scenarioCount} scenarios`);
+  setText('overallLatencyReduction', formatPct(meanImprovement));
+  setText('overallThroughputGain', `${meanThroughputGain.toFixed(1)}x`);
+  setText('overallSuccessRate', totalRequests ? formatPct(totalSuccess / totalRequests * 100) : '0%');
+  setText('throughputMethodBadge', usesMeasuredThroughput ? 'Measured service rate where available' : 'Latency-derived service-rate proxy');
+  renderBenchmarkMetadata(log, rows);
+  renderConcurrencyCharts(log);
+
+  const present = new Set(rows.map(row => row.name));
+  const missingCritical = criticalEndpointOrder.filter(endpoint => !present.has(endpoint));
+  setText(
+    'benchmarkCoverageNote',
+    missingCritical.length
+      ? `Critical targets not present in this log: ${missingCritical.join(', ')}. They remain highlighted as future benchmark targets.`
+      : 'All critical endpoint targets are represented in this benchmark log.'
+  );
+
+  const tbody = document.getElementById('benchmarkBody');
+  tbody.innerHTML = rows.map(row => {
+    const health = classifyHealth(row);
+    const successTotal = Number(row.baselineSuccess || 0) + Number(row.optimizedSuccess || 0);
+    const failureTotal = Number(row.coldFailures || 0) + Number(row.warmFailures || 0);
+    return `
+    <tr class="${criticalEndpointOrder.includes(row.name) ? 'critical-row' : ''}">
+      <td><strong>${row.name}</strong></td>
+      <td>${row.endpointClass}</td>
+      <td>${formatMs(row.baselineLatency)}</td>
+      <td>${formatMs(row.optimizedLatency)}</td>
+      <td>${percentileSummary('optimized', row)}</td>
+      <td>${formatPct(row.improvementPct)}</td>
+      <td>${row.baselineThroughput.toFixed(1)} req/s <span class="method-note">${row.throughputMethod}</span></td>
+      <td>${row.optimizedThroughput.toFixed(1)} req/s <span class="method-note">${row.throughputGain.toFixed(1)}x</span></td>
+      <td>${formatNumber(Number(row.baselineRequests || 0) + Number(row.optimizedRequests || 0))}</td>
+      <td>${formatNumber(successTotal)} success / ${formatNumber(failureTotal)} failed</td>
+      <td><span class="status-pill ${health.className}">${health.label}</span></td>
+    </tr>
+  `;
+  }).join('') || '<tr><td colspan="10">No comparable benchmark rows found</td></tr>';
+
+  renderBarChart('latencyChart', rows, 'latency');
+  renderBarChart('throughputChart', rows, 'throughput');
+}
+
+async function loadMetrics() {
+  const response = await fetch('/api/v1/analysis/metrics', { credentials: 'include' });
+  if (!response.ok) throw new Error(`Failed to fetch metrics (${response.status})`);
+  const data = await response.json();
+  const geocode = data.geocode || {};
+  const route = data.route || {};
+  const comparison = data.comparison || {};
+  const plan = data.plan || {};
+
+  setText('capturedAt', `Captured ${formatTime(data.capturedAt)}`);
+
+  setText('geocodeReduction', formatPct(comparison.geocodeExternalReductionPct));
+  setText('geocodeActualCalls', formatNumber(geocode.externalCalls));
+  setText('geocodeBaselineCalls', formatNumber(geocode.baselineExternalCalls));
+  setText('geocodeSavedCalls', `${formatNumber(geocode.savedExternalCalls)} saved calls`);
+  setText('geocodeRedisRate', formatPct(geocode.redisHitRatePct));
+  setText('geocodeDbRate', formatPct(geocode.dbHitRatePct));
+  setText('geocodeEndpointMs', formatMs(geocode.avgEndpointLatencyMs));
+  setText('geocodeExternalMs', formatMs(geocode.avgExternalLatencyMs));
+  setWidth('geocodeReductionBar', comparison.geocodeExternalReductionPct);
+
+  setText('routeReduction', formatPct(comparison.routeExternalReductionPct));
+  setText('routeActualCalls', formatNumber(route.externalCalls));
+  setText('routeBaselineCalls', formatNumber(route.baselineExternalCalls));
+  setText('routeSavedCalls', `${formatNumber(route.savedExternalCalls)} saved calls`);
+  setText('routeRedisRate', formatPct(route.redisHitRatePct));
+  setText('routeFailures', formatNumber(route.requestFailures));
+  setText('routeEndpointMs', formatMs(route.avgEndpointLatencyMs));
+  setText('routeExternalMs', formatMs(route.avgExternalLatencyMs));
+  setText('routeRequests', formatNumber(route.requests));
+  setText('routeRedisHits', formatNumber(route.redisHits));
+  setText('routeExternalCalls', formatNumber(route.externalCalls));
+  setText('routeTransitFallbacks', formatNumber(route.transitToWalkFallbacks));
+  setText('routeDirectFallbacks', formatNumber(route.directLineFallbacks));
+  setText('routeParallelWallMs', formatMs(route.avgParallelWallMs));
+  setText('routeSerialEstimateMs', formatMs(route.avgSerialEstimateMs));
+  setText('routeParallelSavedMs', formatMs(route.avgParallelSavedMs));
+  setWidth('routeReductionBar', comparison.routeExternalReductionPct);
+
+  setText('planGenerateRequests', formatNumber(plan.generateRequests));
+  setText('planGenerateRedisHits', formatNumber(plan.generateRedisHits));
+  setText('planGenerateExternalCalls', formatNumber(plan.generateExternalCalls));
+  setText('planGenerateFailures', formatNumber(plan.generateFailures));
+  setText('planGenerateEndpointMs', formatMs(plan.generateAvgEndpointLatencyMs));
+  setText('planGenerateExternalMs', formatMs(plan.generateAvgExternalLatencyMs));
+  setText('planViewRequests', formatNumber(plan.viewRequests));
+  setText('planViewMs', formatMs(plan.viewAvgLatencyMs));
+  setText('planPrewarmRequests', formatNumber(plan.prewarmRequests));
+  setText('planPrewarmRouteCalls', formatNumber(plan.prewarmRouteCalls));
+}
+
+async function loadDailyMetrics() {
+  const response = await fetch('/api/v1/analysis/daily?days=14', { credentials: 'include' });
+  if (!response.ok) throw new Error(`Failed to fetch daily metrics (${response.status})`);
+  const rows = await response.json();
+  const tbody = document.getElementById('dailyMetricsBody');
+  if (!Array.isArray(rows) || rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="12">No daily metrics yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(row => `
+    <tr>
+      <td>${row.metricDate ?? '-'}</td>
+      <td>${row.category ?? '-'}</td>
+      <td>${row.endpoint ?? '-'}</td>
+      <td>${formatNumber(row.requestCount)}</td>
+      <td>${formatNumber(row.redisHits)}</td>
+      <td>${formatNumber(row.dbHits)}</td>
+      <td>${formatNumber(row.externalCalls)}</td>
+      <td>${formatNumber(row.failureCount)}</td>
+      <td>${Number(row.requestCount || 0) ? formatMs(Number(row.totalLatencyMs || 0) / Number(row.requestCount || 1)) : 'not reported'}</td>
+      <td>${optionalMs(row.p95LatencyMs, row.p95_latency_ms, row.latencyP95Ms)}</td>
+      <td>${optionalMs(row.p99LatencyMs, row.p99_latency_ms, row.latencyP99Ms)}</td>
+      <td>${formatMs(row.totalLatencyMs)}</td>
+    </tr>
+  `).join('');
+}
+
+async function refreshWithState() {
+  const button = document.getElementById('refreshMetrics');
+  try {
+    button.disabled = true;
+    button.textContent = 'Loading...';
+    await loadMetrics();
+    await loadDailyMetrics();
+    button.textContent = 'Refresh runtime';
+  } catch (error) {
+    button.textContent = 'Retry runtime';
+    console.error(error);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+document.getElementById('stressLogFile').addEventListener('change', async event => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const text = await file.text();
+  renderBenchmark(JSON.parse(text), file.name);
+});
+
+document.getElementById('useEmbeddedLog').addEventListener('click', () => {
+  renderBenchmark(embeddedStressLog, 'embedded latest run');
+});
+
+document.getElementById('refreshMetrics').addEventListener('click', refreshWithState);
+document.getElementById('clearDashboard').addEventListener('click', clearDashboardData);
+renderBenchmark(embeddedStressLog, 'embedded latest run');
+refreshWithState();
+setInterval(() => {
+  loadMetrics().catch(console.error);
+  loadDailyMetrics().catch(console.error);
+}, 15000);
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -39,19 +40,19 @@ public class SecurityConfig {
         JwtAuthFilter jwtFilter = new JwtAuthFilter(jwtUtil);
 
         http
-                .csrf(csrf -> csrf.disable())
+                .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         // allow your index.html and favicon
-                        .requestMatchers("/", "/index.html", "/favicon.ico").permitAll()
+                        .requestMatchers("/", "/index.html", "/map.html", "/analysis-dashboard.html", "/favicon.ico").permitAll()
                         // public map and auth endpoints
-                        .requestMatchers("/api/v1/map/**", "/auth/**", "/actuator/**").permitAll()
+                        .requestMatchers("/api/v1/map/**", "/api/v1/analysis/**", "/auth/**", "/api/v1/plans/raw", "/api/v1/plans/draft", "/api/v1/plans/route-suggestions", "/api/v1/plans/weather", "/api/v1/cache/**").permitAll()
                         // everything under /api/v1/user/** needs a JWT
-                        .requestMatchers("/api/v1/user/**").authenticated()
+                        .requestMatchers("/api/v1/user/**","/api/v1/plans/me/**", "/api/v1/plans/**","/api/v1/plans/{planId}/favorite").authenticated()
                         .anyRequest().denyAll()
                 )
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .httpBasic(basic -> basic.disable());
+                .httpBasic(AbstractHttpConfigurer::disable);
 
         return http.build();
     }

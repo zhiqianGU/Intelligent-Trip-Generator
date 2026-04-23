@@ -1,10 +1,98 @@
 server:
   port: 8080
 
+app:
+  cache:
+    clear-on-shutdown: false
+    redis-prefix: "nav:"
+  jwt:
+    secret: ${JWT_SECRET:dev-only-change-this-jwt-secret-32-bytes-minimum}
+
+google:
+  geocoding:
+    enabled: true
+    api-key: ${GOOGLE_GEOCODING_API_KEY:${GOOGLE_MAPS_API_KEY:}}
+    base-url: https://geocode.googleapis.com/v4beta
+  places:
+    enabled: true
+    api-key: ${GOOGLE_MAPS_API_KEY:}
+    base-url: https://places.googleapis.com/v1
+
+weather:
+  api:
+    enabled: true
+    api-key: ${WEATHER_API_KEY:}
+    base-url: https://api.weatherapi.com/v1
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: count_based
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 2
+    instances:
+      llmProvider:
+        base-config: default
+        sliding-window-size: 6
+        minimum-number-of-calls: 3
+        wait-duration-in-open-state: 45s
+      googlePlaces:
+        base-config: default
+      googleGeocoding:
+        base-config: default
+      geoapifyGeocode:
+        base-config: default
+      geoapifyRoute:
+        base-config: default
+      weatherApi:
+        base-config: default
+        failure-rate-threshold: 70
+  ratelimiter:
+    instances:
+      llmProvider:
+        limit-for-period: 4
+        limit-refresh-period: 1m
+        timeout-duration: 2s
+      googlePlaces:
+        limit-for-period: 30
+        limit-refresh-period: 1m
+        timeout-duration: 1s
+      googleGeocoding:
+        limit-for-period: 30
+        limit-refresh-period: 1m
+        timeout-duration: 1s
+      geoapifyGeocode:
+        limit-for-period: 40
+        limit-refresh-period: 1m
+        timeout-duration: 1s
+      geoapifyRoute:
+        limit-for-period: 80
+        limit-refresh-period: 1m
+        timeout-duration: 1s
+      weatherApi:
+        limit-for-period: 20
+        limit-refresh-period: 1m
+        timeout-duration: 500ms
+
 amap:
-  key: ${AMAP_KEY}
+  key: c50736a2f84345f58aa5f6d5395f2cfb   #${AMAP_KEY}
   base-url: https://api.geoapify.com/v1
 
+quenmoel:
+  provider: qwen
+  model: qwen-max
+  gemini-key: ${GEMINI_API_KEY:}
+  gemini-base-url: https://generativelanguage.googleapis.com/v1beta
+  key: sk-8eff18523cec450e9c472123e1a6aecd
+  base-url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+  copy-polish-enabled: true
+  copy-polish-provider: qwen
+  copy-polish-model: qwen-plus
+  copy-polish-timeout-seconds: 30
 
 
 spring:

@@ -15,6 +15,9 @@ public class Place {
     private Double longitude;
     private String source;       // GEOAPIFY
     private String externalRef;
+    private String websiteUri;
+    private String googleMapsUri;
+    private String businessStatus;
 
     public Place(Long id, String name, String city, String address, String district, Double latitude, String country, Double longitude, String source, String externalRef) {
         this.id = id;
@@ -109,6 +112,30 @@ public class Place {
 
     public void setSource(String source) {
         this.source = source;
+    }
+
+    public String getWebsiteUri() {
+        return websiteUri;
+    }
+
+    public void setWebsiteUri(String websiteUri) {
+        this.websiteUri = websiteUri;
+    }
+
+    public String getGoogleMapsUri() {
+        return googleMapsUri;
+    }
+
+    public void setGoogleMapsUri(String googleMapsUri) {
+        this.googleMapsUri = googleMapsUri;
+    }
+
+    public String getBusinessStatus() {
+        return businessStatus;
+    }
+
+    public void setBusinessStatus(String businessStatus) {
+        this.businessStatus = businessStatus;
     }
 
 

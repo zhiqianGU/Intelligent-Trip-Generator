@@ -1,6 +1,4 @@
 package thesis.project.gu.model;
-import lombok.Data;
-
 import java.time.Instant;
 
 public class AppUser {

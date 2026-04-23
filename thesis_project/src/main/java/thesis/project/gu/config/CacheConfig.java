@@ -48,6 +48,7 @@ public class CacheConfig {
         confMap.put("user_by_id",      base.entryTtl(Duration.ofMinutes(20)));
         confMap.put("user_by_login",   base.entryTtl(Duration.ofMinutes(3)));
         confMap.put("place_by_poi",    base.entryTtl(Duration.ofDays(30)));
+        confMap.put("google_places_text_search", base.entryTtl(Duration.ofDays(1)));
         // 如果给 /map/suggestions 加缓存：
         // confMap.put("suggestions",   base.entryTtl(Duration.ofHours(6)));
 

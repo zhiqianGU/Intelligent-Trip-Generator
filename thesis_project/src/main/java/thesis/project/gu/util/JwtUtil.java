@@ -1,39 +1,52 @@
 package thesis.project.gu.util;
 
-
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import org.apache.commons.codec.digest.DigestUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
+import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.Date;
 import java.util.Map;
 import java.util.function.Function;
 
-
 @Component
 public class JwtUtil {
 
-    // 256-bit key，实际应从 KMS 或 env 注入
-    private static final String SECRET = "replace-with-256bit-secret-replace-with-256bit";
-    private static final Key KEY = Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
     private static final long EXP_MILLIS = Duration.ofHours(4).toMillis();
+    private static final long ACCESS_EXP_MILLIS = Duration.ofMinutes(15).toMillis();
+    private static final SecureRandom RANDOM = new SecureRandom();
 
-    /** 只存 subject（用户名）的老接口 */
+    private final Key key;
+
+    public JwtUtil(@Value("${app.jwt.secret}") String secret) {
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException("app.jwt.secret is not configured");
+        }
+        byte[] bytes = secret.trim().getBytes(StandardCharsets.UTF_8);
+        if (bytes.length < 32) {
+            throw new IllegalStateException("app.jwt.secret must be at least 32 bytes for HS256");
+        }
+        this.key = Keys.hmacShaKeyFor(bytes);
+    }
+
     public String generate(String username) {
         Date now = new Date();
         return Jwts.builder()
                 .subject(username)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + EXP_MILLIS))
-                .signWith(KEY)
+                .signWith(key)
                 .compact();
     }
 
-    /** 可存任意自定义 claims自定义声明，比如 userId、username 等 */
     public String generateWithClaims(Map<String, Object> claims) {
         Date now = new Date();
         Date exp = new Date(now.getTime() + EXP_MILLIS);
@@ -41,29 +54,46 @@ public class JwtUtil {
                 .claims(claims)
                 .issuedAt(now)
                 .expiration(exp)
-                .signWith(KEY)
+                .signWith(key)
                 .compact();
     }
 
-    /** 解析所有 claims自定义声明，抛出异常表示 token 无效 */
     public Claims parseClaims(String token) {
         return Jwts.parser()
-                .verifyWith((SecretKey) KEY)
+                .verifyWith((SecretKey) key)
                 .clockSkewSeconds(60)
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
     }
 
-    /** 通用的取单个 claim 方法 */
+    public String generateAccessToken(Map<String, Object> claims) {
+        Date now = new Date();
+        Date exp = new Date(now.getTime() + ACCESS_EXP_MILLIS);
+        return Jwts.builder()
+                .claims(claims)
+                .issuedAt(now)
+                .expiration(exp)
+                .signWith(key)
+                .compact();
+    }
+
+    public String generateRefreshTokenPlaintext() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    public String hashRefreshToken(String token) {
+        return DigestUtils.sha256Hex(token);
+    }
+
     public <T> T getClaim(String token, Function<Claims, T> resolver) {
         Claims claims = parseClaims(token);
         return resolver.apply(claims);
     }
 
-    /** 验证 token 并返回 subject（用户名） */
     public String validateAndGetUser(String token) {
         return getClaim(token, Claims::getSubject);
     }
 }
-
