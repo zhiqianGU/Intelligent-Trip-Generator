@@ -16,7 +16,7 @@
                 This page separates controlled benchmark evidence, live runtime counters, and historical
                 persisted metrics. It is designed for thesis/demo discussion of heavy AI orchestration endpoints
                 such as <code>/draft</code> and <code>/raw</code>, and lighter supporting endpoints such as
-                <code>/route-suggestions</code>, route, geocode, and weather services.
+                <code>/route-suggestions/day</code>, route, geocode, and weather services.
             </p>
             <div class="hero-facts">
                 <span>Source: <code>scripts/load-test.ps1</code></span>
@@ -139,7 +139,7 @@
                 <span>Critical target for richer logs. Heavy generation plus authenticated persistence path when a user is logged in.</span>
             </div>
             <div class="endpoint-card medium">
-                <strong>/route-suggestions</strong>
+                <strong>/route-suggestions/day</strong>
                 <span>Critical target for richer logs. Route recommendation and segment comparison based on generated itinerary stops.</span>
             </div>
             <div class="endpoint-card light">
@@ -462,10 +462,10 @@ const endpointAliases = {
   draft: '/draft',
   plan_raw: '/raw',
   raw: '/raw',
-  route_suggestions: '/route-suggestions',
-  routeSuggestions: '/route-suggestions'
+  route_suggestions: '/route-suggestions/day',
+  routeSuggestions: '/route-suggestions/day'
 };
-const criticalEndpointOrder = ['/draft', '/raw', '/route-suggestions'];
+const criticalEndpointOrder = ['/draft', '/raw', '/route-suggestions/day'];
 
 function setText(id, value) {
   const node = document.getElementById(id);
@@ -564,7 +564,7 @@ function canonicalEndpoint(name) {
 function endpointClass(name) {
   const endpoint = canonicalEndpoint(name);
   if (endpoint === '/draft' || endpoint === '/raw') return 'Heavy AI orchestration';
-  if (endpoint === '/route-suggestions') return 'Route recommendation';
+  if (endpoint === '/route-suggestions/day') return 'Route recommendation';
   if (endpoint.includes('route')) return 'Map route service';
   if (endpoint.includes('geocode')) return 'Map geocode service';
   if (endpoint.includes('weather')) return 'Weather service';

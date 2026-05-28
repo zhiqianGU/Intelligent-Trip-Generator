@@ -1,0 +1,21 @@
+{
+  "city": "Testville",
+  "country": "Testland",
+  "state": "TS",
+  "currency": "TST",
+  "items": [
+    {
+      "name": "Testville Central Hotel",
+      "category": "hotel",
+      "area": "Central",
+      "addressLine": "1 Central Street, Testville",
+      "latitude": 10.0,
+      "longitude": 20.0,
+      "priority": 90,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "source": "LOCAL_TEST",
+      "verificationLevel": "TEST"
+    }
+  ]
+}

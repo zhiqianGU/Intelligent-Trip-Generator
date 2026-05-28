@@ -1,0 +1,215 @@
+{
+  "city": "Brisbane",
+  "datasetType": "hotels",
+  "description": "Curated Brisbane hotel dataset for fast local itinerary generation. Verify current prices and availability before production use.",
+  "items": [
+    {
+      "name": "Emporium Hotel South Bank",
+      "type": "hotel",
+      "category": "hotel",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "267 Grey Street, South Brisbane",
+      "latitude": -27.4792,
+      "longitude": 153.021,
+      "stayMinutes": 0,
+      "styleTags": [
+        "luxury",
+        "south_bank",
+        "rooftop_pool",
+        "walkable"
+      ],
+      "timeSlots": [
+        "night"
+      ],
+      "priority": 95,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "W Brisbane",
+      "type": "hotel",
+      "category": "hotel",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "81 North Quay, Brisbane City",
+      "latitude": -27.4707,
+      "longitude": 153.0209,
+      "stayMinutes": 0,
+      "styleTags": [
+        "luxury",
+        "riverfront",
+        "cbd",
+        "modern"
+      ],
+      "timeSlots": [
+        "night"
+      ],
+      "priority": 93,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Hyatt Regency Brisbane",
+      "type": "hotel",
+      "category": "hotel",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "72 Queen Street, Brisbane City",
+      "latitude": -27.471,
+      "longitude": 153.0238,
+      "stayMinutes": 0,
+      "styleTags": [
+        "cbd",
+        "shopping",
+        "central",
+        "business"
+      ],
+      "timeSlots": [
+        "night"
+      ],
+      "priority": 90,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "The Westin Brisbane",
+      "type": "hotel",
+      "category": "hotel",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "111 Mary Street, Brisbane City",
+      "latitude": -27.4725,
+      "longitude": 153.0279,
+      "stayMinutes": 0,
+      "styleTags": [
+        "luxury",
+        "wellness",
+        "cbd",
+        "pool"
+      ],
+      "timeSlots": [
+        "night"
+      ],
+      "priority": 90,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "The Calile Hotel",
+      "type": "hotel",
+      "category": "hotel",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "48 James Street, Fortitude Valley",
+      "latitude": -27.4563,
+      "longitude": 153.0403,
+      "stayMinutes": 0,
+      "styleTags": [
+        "luxury",
+        "boutique",
+        "james_street",
+        "pool"
+      ],
+      "timeSlots": [
+        "night"
+      ],
+      "priority": 94,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Crystalbrook Vincent",
+      "type": "hotel",
+      "category": "hotel",
+      "city": "Brisbane",
+      "area": "Howard Smith Wharves",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.4629,
+      "longitude": 153.0357,
+      "stayMinutes": 0,
+      "styleTags": [
+        "riverfront",
+        "art_hotel",
+        "howard_smith_wharves",
+        "nightlife"
+      ],
+      "timeSlots": [
+        "night"
+      ],
+      "priority": 91,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Meriton Suites Herschel Street, Brisbane",
+      "type": "hotel",
+      "category": "serviced_apartment",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "43 Herschel Street, Brisbane City",
+      "latitude": -27.4678,
+      "longitude": 153.0192,
+      "stayMinutes": 0,
+      "styleTags": [
+        "serviced_apartment",
+        "cbd",
+        "family",
+        "long_stay"
+      ],
+      "timeSlots": [
+        "night"
+      ],
+      "priority": 87,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "ibis Styles Brisbane Elizabeth Street",
+      "type": "hotel",
+      "category": "hotel",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "40 Elizabeth Street, Brisbane City",
+      "latitude": -27.4718,
+      "longitude": 153.0235,
+      "stayMinutes": 0,
+      "styleTags": [
+        "budget_friendly",
+        "cbd",
+        "central",
+        "family"
+      ],
+      "timeSlots": [
+        "night"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    }
+  ]
+}

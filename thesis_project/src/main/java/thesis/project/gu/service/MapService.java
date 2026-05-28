@@ -2,6 +2,8 @@ package thesis.project.gu.service;
 
 
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.databind.JsonNode;
 
 import io.micrometer.common.lang.Nullable;
@@ -22,6 +24,7 @@ import thesis.project.gu.mapper.PlaceMapper;
 import thesis.project.gu.model.Place;
 import thesis.project.gu.response.GeoResponse;
 import thesis.project.gu.response.GeoRouteResponse;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 
 import java.math.BigDecimal;
@@ -35,19 +38,37 @@ import java.util.stream.Collectors;
 @Service
 public class MapService {
     private static final Logger log = LoggerFactory.getLogger(MapService.class);
+    private static final Duration NEGATIVE_CACHE_TTL = Duration.ofMinutes(5);
+    private static final Cache<String, Boolean> GEOCODE_EMPTY_NEGATIVE_CACHE = Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(NEGATIVE_CACHE_TTL)
+            .build();
+    private static final Cache<String, Boolean> TRANSIT_UNAVAILABLE_NEGATIVE_CACHE = Caffeine.newBuilder()
+            .maximumSize(10_000)
+            .expireAfterWrite(NEGATIVE_CACHE_TTL)
+            .build();
     private final AmapClient amap;
     @Getter
     private final CacheManager cacheManager;
     private final PlaceMapper placeMapper;
     private final RuntimeMetricsService runtimeMetricsService;
     private final GoogleGeocodingClient googleGeocodingClient;
+    private final SingleFlightService singleFlightService;
 
-    public MapService(AmapClient amap, CacheManager cacheManager, PlaceMapper placeMapper, RuntimeMetricsService runtimeMetricsService, GoogleGeocodingClient googleGeocodingClient) {
+    public MapService(
+            AmapClient amap,
+            CacheManager cacheManager,
+            PlaceMapper placeMapper,
+            RuntimeMetricsService runtimeMetricsService,
+            GoogleGeocodingClient googleGeocodingClient,
+            SingleFlightService singleFlightService
+    ) {
         this.amap = amap;
         this.cacheManager = cacheManager;
         this.placeMapper = placeMapper;
         this.runtimeMetricsService = runtimeMetricsService;
         this.googleGeocodingClient = googleGeocodingClient;
+        this.singleFlightService = singleFlightService;
     }
 
     private static String norm(String s) {
@@ -68,7 +89,7 @@ public class MapService {
                 runtimeMetricsService.recordGeocodeDbHit();
                 return toGeoResponse(cachedPlaces);
             }
-            log.info("Bypassed cached coordinates for large-area geocode query={}", address);
+            log.debug("Bypassed cached coordinates for large-area geocode query={}", address);
         }
 
         if (googlePlan != null) {
@@ -97,7 +118,7 @@ public class MapService {
                 runtimeMetricsService.recordGeocodeDbHit();
                 return toGeoResponse(cachedPlaces);
             }
-            log.info("Bypassed cached coordinates for large-area geocode query={}", address);
+            log.debug("Bypassed cached coordinates for large-area geocode query={}", address);
         }
         if (googlePlan != null) {
             GeoResponse google = tryGoogleGeocodePlan(address, city, googlePlan, false);
@@ -165,11 +186,28 @@ public class MapService {
     }
 
     private GeoResponse fetchExternalGeocode(String address, @Nullable String city) {
-        GeoResponse resp = amap.geocode(address, city);
+        String key = geocodeFlightKey(address, city);
+        if (GEOCODE_EMPTY_NEGATIVE_CACHE.getIfPresent(key) != null) {
+            throw new NavigatorException(ErrorCode.GEOCODE_FAIL, "Geoapify geocoding skipped by short negative cache");
+        }
+        GeoResponse resp;
+        try {
+            resp = singleFlightService.execute("external-geocode", key, () -> amap.geocode(address, city));
+        } catch (NavigatorException ex) {
+            if (ex.getMessage() != null && ex.getMessage().toLowerCase().contains("empty")) {
+                GEOCODE_EMPTY_NEGATIVE_CACHE.put(key, Boolean.TRUE);
+            }
+            throw ex;
+        }
         if (resp == null || resp.features() == null || resp.features().isEmpty()) {
+            GEOCODE_EMPTY_NEGATIVE_CACHE.put(key, Boolean.TRUE);
             throw new NavigatorException(ErrorCode.GEOCODE_FAIL, "Geoapify geocoding failed: empty result");
         }
         return resp;
+    }
+
+    private String geocodeFlightKey(String address, @Nullable String city) {
+        return norm(address) + "|" + norm(city);
     }
 
     private GoogleGeocodePlan googleGeocodePlan(String address, @Nullable String city) {
@@ -287,7 +325,7 @@ public class MapService {
                 continue;
             }
             if (!isAcceptedGoogleGeocode(candidate, google)) {
-                log.info("Rejected Google geocode candidate query={} original={} reason=semantic-mismatch",
+                log.debug("Rejected Google geocode candidate query={} original={} reason=semantic-mismatch",
                         candidate.query(), originalQuery);
                 continue;
             }
@@ -449,7 +487,7 @@ public class MapService {
 
     @Cacheable(cacheNames = "car_route", key = "#origin + ':' + #destination")
     public GeoRouteResponse car_route(String origin, String destination) {
-        GeoRouteResponse r = amap.drivingRoute(origin, destination);
+        GeoRouteResponse r = singleFlightService.execute("car-route", routeFlightKey(origin, destination), () -> amap.drivingRoute(origin, destination));
         ensureNonEmpty(r, "car");
         return r;
     }
@@ -457,7 +495,7 @@ public class MapService {
     /* 主路线：walk */
     @Cacheable(cacheNames = "walk_route", key = "#origin + ':' + #destination")
     public GeoRouteResponse walk_route(String origin, String destination) {
-        GeoRouteResponse r = amap.walkingRoute(origin, destination);
+        GeoRouteResponse r = singleFlightService.execute("walk-route", routeFlightKey(origin, destination), () -> amap.walkingRoute(origin, destination));
         ensureNonEmpty(r, "walk");
         return r;
     }
@@ -465,9 +503,20 @@ public class MapService {
     /* 主路线：transit（市内，跨城暂不考虑） */
     @Cacheable(cacheNames = "transit_route", key = "#origin + ':' + #destination")
     public GeoRouteResponse transit_route(String origin, String destination) {
-        GeoRouteResponse r = amap.transitRoute(origin, destination);
-        ensureNonEmpty(r, "transit");
+        String key = routeFlightKey(origin, destination);
+        if (TRANSIT_UNAVAILABLE_NEGATIVE_CACHE.getIfPresent(key) != null) {
+            throw new NavigatorException(ErrorCode.ROUTE_FAIL, "Geoapify transit route skipped by short negative cache");
+        }
+        GeoRouteResponse r = singleFlightService.execute("transit-route", key, () -> amap.transitRoute(origin, destination));
+        if (!isRouteUsable(r)) {
+            TRANSIT_UNAVAILABLE_NEGATIVE_CACHE.put(key, Boolean.TRUE);
+            throw new NavigatorException(ErrorCode.ROUTE_FAIL, "Geoapify transit empty route");
+        }
         return r;
+    }
+
+    private String routeFlightKey(String origin, String destination) {
+        return safe(origin, "") + ":" + safe(destination, "");
     }
 
     public GeoRouteResponse directLineHint(String origin, String destination, String requestedMode) {
@@ -497,6 +546,14 @@ public class MapService {
                 new GeoRouteResponse.Geometry("LineString", List.of(line))
         );
         return new GeoRouteResponse("FeatureCollection", List.of(feature));
+    }
+
+    private static boolean isRouteUsable(GeoRouteResponse r) {
+        if (r == null || r.features() == null || r.features().isEmpty()) {
+            return false;
+        }
+        var p = r.features().get(0).properties();
+        return p != null && p.distance() != null && p.time() != null;
     }
 
     private static void ensureNonEmpty(GeoRouteResponse r, String mode) {
@@ -568,13 +625,39 @@ public class MapService {
     public record RouteSummary(String distanceMeters, String durationSeconds) {}
 
     @Cacheable(cacheNames = "walk_summary", key = "#origin + ':' + #destination", unless = "#result == null")
-    public RouteSummary walk_summary(String origin, String destination) { return summarize(amap.walkingRouteRaw(origin, destination)); }
+    public RouteSummary walk_summary(String origin, String destination) {
+        return singleFlightService.execute(
+                "walk-summary",
+                routeFlightKey(origin, destination),
+                () -> summarize(amap.walkingRouteRaw(origin, destination))
+        );
+    }
 
     @Cacheable(cacheNames = "car_summary", key = "#origin + ':' + #destination", unless = "#result == null")
-    public RouteSummary car_summary(String origin, String destination) { return summarize(amap.drivingRouteRaw(origin, destination)); }
+    public RouteSummary car_summary(String origin, String destination) {
+        return singleFlightService.execute(
+                "car-summary",
+                routeFlightKey(origin, destination),
+                () -> summarize(amap.drivingRouteRaw(origin, destination))
+        );
+    }
 
     @Cacheable(cacheNames = "transit_summary", key = "#origin + ':' + #destination", unless = "#result == null")
-    public RouteSummary transit_summary(String origin, String destination) { return summarize(amap.transitRouteRaw(origin, destination)); }
+    public RouteSummary transit_summary(String origin, String destination) {
+        String key = routeFlightKey(origin, destination);
+        if (TRANSIT_UNAVAILABLE_NEGATIVE_CACHE.getIfPresent(key) != null) {
+            return null;
+        }
+        RouteSummary summary = singleFlightService.execute(
+                "transit-summary",
+                key,
+                () -> summarize(amap.transitRouteRaw(origin, destination))
+        );
+        if (summary == null) {
+            TRANSIT_UNAVAILABLE_NEGATIVE_CACHE.put(key, Boolean.TRUE);
+        }
+        return summary;
+    }
 
     private RouteSummary summarize(JsonNode root) {
         try {
@@ -594,7 +677,7 @@ public class MapService {
 
             return new RouteSummary(String.valueOf(dist), String.valueOf(time));
         } catch (Exception e) {
-            log.warn("summarize failed", e);
+            log.debug("summarize failed", e);
             return null;
         }
     }

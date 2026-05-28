@@ -1,0 +1,2288 @@
+{
+  "city": "Brisbane",
+  "pois": [
+    {
+      "name": "South Bank Parklands",
+      "type": "attraction",
+      "category": "park",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "South Bank, Brisbane",
+      "latitude": -27.478,
+      "longitude": 153.0225,
+      "stayMinutes": 120,
+      "styleTags": [
+        "nature",
+        "family",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 98,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Streets Beach",
+      "type": "attraction",
+      "category": "urban_beach",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Stanley Street Plaza, South Bank",
+      "latitude": -27.4788,
+      "longitude": 153.0235,
+      "stayMinutes": 90,
+      "styleTags": [
+        "family",
+        "relaxation",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 94,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "The Wheel of Brisbane",
+      "type": "attraction",
+      "category": "landmark",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Russell Street, South Brisbane",
+      "latitude": -27.4749,
+      "longitude": 153.0217,
+      "stayMinutes": 45,
+      "styleTags": [
+        "landmark",
+        "view",
+        "family"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 92,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Queensland Museum Kurilpa",
+      "type": "attraction",
+      "category": "museum",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Queensland Cultural Centre, South Brisbane",
+      "latitude": -27.4728,
+      "longitude": 153.0183,
+      "stayMinutes": 90,
+      "styleTags": [
+        "culture",
+        "family",
+        "education"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 96,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "SparkLab, Sciencentre",
+      "type": "attraction",
+      "category": "science_museum",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Queensland Museum, South Brisbane",
+      "latitude": -27.4727,
+      "longitude": 153.0184,
+      "stayMinutes": 90,
+      "styleTags": [
+        "science",
+        "family",
+        "education"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 88,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Queensland Art Gallery",
+      "type": "attraction",
+      "category": "art_gallery",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Stanley Place, South Brisbane",
+      "latitude": -27.4721,
+      "longitude": 153.018,
+      "stayMinutes": 90,
+      "styleTags": [
+        "culture",
+        "art"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 94,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Gallery of Modern Art",
+      "type": "attraction",
+      "category": "art_gallery",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Stanley Place, South Brisbane",
+      "latitude": -27.4706,
+      "longitude": 153.0171,
+      "stayMinutes": 120,
+      "styleTags": [
+        "culture",
+        "art",
+        "modern"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 96,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "State Library of Queensland",
+      "type": "attraction",
+      "category": "library",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Stanley Place, South Brisbane",
+      "latitude": -27.4715,
+      "longitude": 153.0174,
+      "stayMinutes": 60,
+      "styleTags": [
+        "culture",
+        "education",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 85,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Queensland Performing Arts Centre",
+      "type": "attraction",
+      "category": "performing_arts",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Grey Street, South Brisbane",
+      "latitude": -27.4741,
+      "longitude": 153.018,
+      "stayMinutes": 90,
+      "styleTags": [
+        "culture",
+        "performance"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Queensland Maritime Museum",
+      "type": "attraction",
+      "category": "museum",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "412 Stanley Street, South Brisbane",
+      "latitude": -27.4812,
+      "longitude": 153.0258,
+      "stayMinutes": 75,
+      "styleTags": [
+        "history",
+        "family",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Nepalese Peace Pagoda",
+      "type": "attraction",
+      "category": "landmark",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "South Bank Parklands, Brisbane",
+      "latitude": -27.4774,
+      "longitude": 153.0221,
+      "stayMinutes": 30,
+      "styleTags": [
+        "culture",
+        "landmark",
+        "relaxation"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Brisbane Sign",
+      "type": "attraction",
+      "category": "landmark",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "South Bank, Brisbane",
+      "latitude": -27.4753,
+      "longitude": 153.0215,
+      "stayMinutes": 20,
+      "styleTags": [
+        "landmark",
+        "photo",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "River Quay Green",
+      "type": "attraction",
+      "category": "park",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "South Bank, Brisbane",
+      "latitude": -27.481,
+      "longitude": 153.0244,
+      "stayMinutes": 45,
+      "styleTags": [
+        "riverfront",
+        "relaxation",
+        "dining_precinct"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Roma Street Parkland",
+      "type": "attraction",
+      "category": "park",
+      "city": "Brisbane",
+      "area": "Roma Street",
+      "addressLine": "1 Parkland Boulevard, Brisbane City",
+      "latitude": -27.4627,
+      "longitude": 153.018,
+      "stayMinutes": 90,
+      "styleTags": [
+        "nature",
+        "garden",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 94,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "City Botanic Gardens",
+      "type": "attraction",
+      "category": "botanic_garden",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "Alice Street, Brisbane City",
+      "latitude": -27.4752,
+      "longitude": 153.0304,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "garden",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 91,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Museum of Brisbane",
+      "type": "attraction",
+      "category": "museum",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "Level 3, Brisbane City Hall, King George Square",
+      "latitude": -27.4689,
+      "longitude": 153.0235,
+      "stayMinutes": 75,
+      "styleTags": [
+        "culture",
+        "history",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 89,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Brisbane City Hall",
+      "type": "attraction",
+      "category": "heritage_building",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "64 Adelaide Street, Brisbane City",
+      "latitude": -27.4689,
+      "longitude": 153.0235,
+      "stayMinutes": 45,
+      "styleTags": [
+        "heritage",
+        "architecture",
+        "culture"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 88,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "City Hall Clock Tower",
+      "type": "attraction",
+      "category": "lookout",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "Brisbane City Hall, King George Square",
+      "latitude": -27.4689,
+      "longitude": 153.0236,
+      "stayMinutes": 45,
+      "styleTags": [
+        "heritage",
+        "view",
+        "landmark"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "King George Square",
+      "type": "attraction",
+      "category": "public_square",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "King George Square, Brisbane City",
+      "latitude": -27.4683,
+      "longitude": 153.0241,
+      "stayMinutes": 30,
+      "styleTags": [
+        "landmark",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 75,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Queen Street Mall",
+      "type": "attraction",
+      "category": "shopping_precinct",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "Queen Street, Brisbane City",
+      "latitude": -27.4705,
+      "longitude": 153.0244,
+      "stayMinutes": 90,
+      "styleTags": [
+        "shopping",
+        "city_walk",
+        "food"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 90,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Brisbane Arcade",
+      "type": "attraction",
+      "category": "heritage_shopping",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "160 Queen Street, Brisbane City",
+      "latitude": -27.4693,
+      "longitude": 153.0245,
+      "stayMinutes": 45,
+      "styleTags": [
+        "heritage",
+        "shopping",
+        "architecture"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Anzac Square Memorial Galleries",
+      "type": "attraction",
+      "category": "memorial",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "Anzac Square, Brisbane City",
+      "latitude": -27.4668,
+      "longitude": 153.026,
+      "stayMinutes": 45,
+      "styleTags": [
+        "history",
+        "memorial",
+        "culture"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Cathedral of St Stephen",
+      "type": "attraction",
+      "category": "cathedral",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "249 Elizabeth Street, Brisbane City",
+      "latitude": -27.4692,
+      "longitude": 153.0282,
+      "stayMinutes": 30,
+      "styleTags": [
+        "heritage",
+        "architecture",
+        "culture"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "St John's Cathedral",
+      "type": "attraction",
+      "category": "cathedral",
+      "city": "Brisbane",
+      "area": "Spring Hill",
+      "addressLine": "373 Ann Street, Brisbane City",
+      "latitude": -27.4628,
+      "longitude": 153.0302,
+      "stayMinutes": 45,
+      "styleTags": [
+        "heritage",
+        "architecture",
+        "culture"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Customs House",
+      "type": "attraction",
+      "category": "heritage_building",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "399 Queen Street, Brisbane City",
+      "latitude": -27.4649,
+      "longitude": 153.0305,
+      "stayMinutes": 45,
+      "styleTags": [
+        "heritage",
+        "architecture",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Queensland Parliament House",
+      "type": "attraction",
+      "category": "heritage_building",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "George Street, Brisbane City",
+      "latitude": -27.4757,
+      "longitude": 153.0269,
+      "stayMinutes": 60,
+      "styleTags": [
+        "history",
+        "heritage",
+        "civic"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Old Government House",
+      "type": "attraction",
+      "category": "heritage_building",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "2 George Street, Brisbane City",
+      "latitude": -27.4771,
+      "longitude": 153.0284,
+      "stayMinutes": 60,
+      "styleTags": [
+        "history",
+        "heritage",
+        "culture"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 73,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Commissariat Store Museum",
+      "type": "attraction",
+      "category": "museum",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "115 William Street, Brisbane City",
+      "latitude": -27.4732,
+      "longitude": 153.0245,
+      "stayMinutes": 60,
+      "styleTags": [
+        "history",
+        "heritage",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "MacArthur Museum Brisbane",
+      "type": "attraction",
+      "category": "museum",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "201 Edward Street, Brisbane City",
+      "latitude": -27.468,
+      "longitude": 153.0266,
+      "stayMinutes": 60,
+      "styleTags": [
+        "history",
+        "war_history",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 69,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Howard Smith Wharves",
+      "type": "attraction",
+      "category": "riverfront_precinct",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.4633,
+      "longitude": 153.035,
+      "stayMinutes": 90,
+      "styleTags": [
+        "riverfront",
+        "dining_precinct",
+        "nightlife"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 92,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Story Bridge Adventure Climb",
+      "type": "attraction",
+      "category": "adventure",
+      "city": "Brisbane",
+      "area": "Kangaroo Point",
+      "addressLine": "170 Main Street, Kangaroo Point",
+      "latitude": -27.465,
+      "longitude": 153.0364,
+      "stayMinutes": 150,
+      "styleTags": [
+        "adventure",
+        "view",
+        "landmark"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 88,
+      "familyFriendly": false,
+      "budgetLevel": "high",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Kangaroo Point Cliffs Park",
+      "type": "attraction",
+      "category": "lookout",
+      "city": "Brisbane",
+      "area": "Kangaroo Point",
+      "addressLine": "River Terrace, Kangaroo Point",
+      "latitude": -27.4811,
+      "longitude": 153.0341,
+      "stayMinutes": 60,
+      "styleTags": [
+        "view",
+        "nature",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 90,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Kangaroo Point Bridge",
+      "type": "attraction",
+      "category": "bridge",
+      "city": "Brisbane",
+      "area": "Kangaroo Point",
+      "addressLine": "Kangaroo Point to Brisbane CBD",
+      "latitude": -27.4724,
+      "longitude": 153.0325,
+      "stayMinutes": 45,
+      "styleTags": [
+        "city_walk",
+        "view",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "New Farm Park",
+      "type": "attraction",
+      "category": "park",
+      "city": "Brisbane",
+      "area": "New Farm",
+      "addressLine": "1042 Brunswick Street, New Farm",
+      "latitude": -27.4699,
+      "longitude": 153.051,
+      "stayMinutes": 90,
+      "styleTags": [
+        "nature",
+        "family",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 88,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Brisbane Powerhouse",
+      "type": "attraction",
+      "category": "performing_arts",
+      "city": "Brisbane",
+      "area": "New Farm",
+      "addressLine": "119 Lamington Street, New Farm",
+      "latitude": -27.4677,
+      "longitude": 153.0538,
+      "stayMinutes": 75,
+      "styleTags": [
+        "culture",
+        "performance",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Newstead House",
+      "type": "attraction",
+      "category": "heritage_house",
+      "city": "Brisbane",
+      "area": "Newstead",
+      "addressLine": "Cnr Breakfast Creek Road and Newstead Avenue, Newstead",
+      "latitude": -27.4434,
+      "longitude": 153.0469,
+      "stayMinutes": 60,
+      "styleTags": [
+        "history",
+        "heritage",
+        "riverfront"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 73,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Teneriffe Woolstores",
+      "type": "attraction",
+      "category": "heritage_precinct",
+      "city": "Brisbane",
+      "area": "Teneriffe",
+      "addressLine": "Vernon Terrace, Teneriffe",
+      "latitude": -27.4547,
+      "longitude": 153.0475,
+      "stayMinutes": 45,
+      "styleTags": [
+        "heritage",
+        "architecture",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "James Street Precinct",
+      "type": "attraction",
+      "category": "shopping_precinct",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "James Street, Fortitude Valley",
+      "latitude": -27.4564,
+      "longitude": 153.0395,
+      "stayMinutes": 90,
+      "styleTags": [
+        "shopping",
+        "food",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Chinatown Mall",
+      "type": "attraction",
+      "category": "cultural_precinct",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "Duncan Street, Fortitude Valley",
+      "latitude": -27.4579,
+      "longitude": 153.0348,
+      "stayMinutes": 45,
+      "styleTags": [
+        "culture",
+        "food",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Eat Street Northshore",
+      "type": "attraction",
+      "category": "food_precinct",
+      "city": "Brisbane",
+      "area": "Northshore Hamilton",
+      "addressLine": "221D MacArthur Avenue, Hamilton",
+      "latitude": -27.4418,
+      "longitude": 153.0781,
+      "stayMinutes": 120,
+      "styleTags": [
+        "food",
+        "market",
+        "family"
+      ],
+      "timeSlots": [
+        "evening"
+      ],
+      "priority": 92,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Portside Wharf",
+      "type": "attraction",
+      "category": "riverfront_precinct",
+      "city": "Brisbane",
+      "area": "Hamilton",
+      "addressLine": "39 Hercules Street, Hamilton",
+      "latitude": -27.44,
+      "longitude": 153.0705,
+      "stayMinutes": 75,
+      "styleTags": [
+        "riverfront",
+        "food",
+        "shopping"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 75,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Mount Coot-tha Lookout",
+      "type": "attraction",
+      "category": "lookout",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "1012 Sir Samuel Griffith Drive, Mount Coot-tha",
+      "latitude": -27.484,
+      "longitude": 152.9584,
+      "stayMinutes": 60,
+      "styleTags": [
+        "view",
+        "nature",
+        "landmark"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 97,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Brisbane Botanic Gardens Mt Coot-tha",
+      "type": "attraction",
+      "category": "botanic_garden",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "152 Mount Coot-tha Road, Toowong",
+      "latitude": -27.4756,
+      "longitude": 152.9757,
+      "stayMinutes": 120,
+      "styleTags": [
+        "nature",
+        "garden",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 95,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Sir Thomas Brisbane Planetarium",
+      "type": "attraction",
+      "category": "planetarium",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "Brisbane Botanic Gardens, Toowong",
+      "latitude": -27.4769,
+      "longitude": 152.9764,
+      "stayMinutes": 75,
+      "styleTags": [
+        "science",
+        "family",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "JC Slaughter Falls",
+      "type": "attraction",
+      "category": "nature_reserve",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "Sir Samuel Griffith Drive, Mount Coot-tha",
+      "latitude": -27.4778,
+      "longitude": 152.9607,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "walking",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Simpson Falls Picnic Area",
+      "type": "attraction",
+      "category": "nature_reserve",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "Sir Samuel Griffith Drive, Mount Coot-tha",
+      "latitude": -27.4706,
+      "longitude": 152.9581,
+      "stayMinutes": 60,
+      "styleTags": [
+        "nature",
+        "walking",
+        "picnic"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Lone Pine Koala Sanctuary",
+      "type": "attraction",
+      "category": "wildlife_sanctuary",
+      "city": "Brisbane",
+      "area": "Fig Tree Pocket",
+      "addressLine": "708 Jesmond Road, Fig Tree Pocket",
+      "latitude": -27.5333,
+      "longitude": 152.9687,
+      "stayMinutes": 240,
+      "styleTags": [
+        "wildlife",
+        "family",
+        "nature"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 98,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Sherwood Arboretum",
+      "type": "attraction",
+      "category": "arboretum",
+      "city": "Brisbane",
+      "area": "Sherwood",
+      "addressLine": "Jolimont Street, Sherwood",
+      "latitude": -27.5328,
+      "longitude": 152.9808,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "garden",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 73,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Rocks Riverside Park",
+      "type": "attraction",
+      "category": "park",
+      "city": "Brisbane",
+      "area": "Seventeen Mile Rocks",
+      "addressLine": "Counihan Road, Seventeen Mile Rocks",
+      "latitude": -27.5431,
+      "longitude": 152.9604,
+      "stayMinutes": 90,
+      "styleTags": [
+        "family",
+        "riverfront",
+        "nature"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Oxley Creek Common",
+      "type": "attraction",
+      "category": "wetland",
+      "city": "Brisbane",
+      "area": "Rocklea",
+      "addressLine": "Sherwood Road, Rocklea",
+      "latitude": -27.5358,
+      "longitude": 153.0034,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "walking",
+        "birdwatching"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Karawatha Forest Discovery Centre",
+      "type": "attraction",
+      "category": "nature_centre",
+      "city": "Brisbane",
+      "area": "Karawatha",
+      "addressLine": "Acacia Road, Karawatha",
+      "latitude": -27.6287,
+      "longitude": 153.087,
+      "stayMinutes": 90,
+      "styleTags": [
+        "nature",
+        "education",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Boondall Wetlands Environment Centre",
+      "type": "attraction",
+      "category": "nature_centre",
+      "city": "Brisbane",
+      "area": "Boondall",
+      "addressLine": "31 Paperbark Drive, Boondall",
+      "latitude": -27.3504,
+      "longitude": 153.0739,
+      "stayMinutes": 90,
+      "styleTags": [
+        "nature",
+        "birdwatching",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 75,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Nudgee Beach Reserve",
+      "type": "attraction",
+      "category": "coastal_park",
+      "city": "Brisbane",
+      "area": "Nudgee Beach",
+      "addressLine": "Nudgee Beach, Brisbane",
+      "latitude": -27.3424,
+      "longitude": 153.1005,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "coastal",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Shorncliffe Pier",
+      "type": "attraction",
+      "category": "pier",
+      "city": "Brisbane",
+      "area": "Shorncliffe",
+      "addressLine": "Park Parade, Shorncliffe",
+      "latitude": -27.3265,
+      "longitude": 153.0825,
+      "stayMinutes": 60,
+      "styleTags": [
+        "coastal",
+        "view",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Sandgate Foreshore",
+      "type": "attraction",
+      "category": "coastal_walk",
+      "city": "Brisbane",
+      "area": "Sandgate",
+      "addressLine": "Flinders Parade, Sandgate",
+      "latitude": -27.319,
+      "longitude": 153.0696,
+      "stayMinutes": 90,
+      "styleTags": [
+        "coastal",
+        "walking",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Fort Lytton National Park",
+      "type": "attraction",
+      "category": "historic_site",
+      "city": "Brisbane",
+      "area": "Lytton",
+      "addressLine": "160 South Street, Lytton",
+      "latitude": -27.4101,
+      "longitude": 153.1503,
+      "stayMinutes": 90,
+      "styleTags": [
+        "history",
+        "heritage",
+        "nature"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Boggo Road Gaol",
+      "type": "attraction",
+      "category": "historic_site",
+      "city": "Brisbane",
+      "area": "Dutton Park",
+      "addressLine": "21 Boggo Road, Dutton Park",
+      "latitude": -27.4941,
+      "longitude": 153.0289,
+      "stayMinutes": 90,
+      "styleTags": [
+        "history",
+        "heritage",
+        "guided_tour"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 78,
+      "familyFriendly": false,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "The Gabba",
+      "type": "attraction",
+      "category": "stadium",
+      "city": "Brisbane",
+      "area": "Woolloongabba",
+      "addressLine": "Vulture Street, Woolloongabba",
+      "latitude": -27.4859,
+      "longitude": 153.0381,
+      "stayMinutes": 90,
+      "styleTags": [
+        "sport",
+        "landmark"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Suncorp Stadium",
+      "type": "attraction",
+      "category": "stadium",
+      "city": "Brisbane",
+      "area": "Milton",
+      "addressLine": "40 Castlemaine Street, Milton",
+      "latitude": -27.4648,
+      "longitude": 153.0095,
+      "stayMinutes": 90,
+      "styleTags": [
+        "sport",
+        "landmark"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "XXXX Brewery Tour",
+      "type": "attraction",
+      "category": "brewery_tour",
+      "city": "Brisbane",
+      "area": "Milton",
+      "addressLine": "20 Paten Street, Milton",
+      "latitude": -27.4683,
+      "longitude": 153.0049,
+      "stayMinutes": 90,
+      "styleTags": [
+        "food",
+        "heritage",
+        "guided_tour"
+      ],
+      "timeSlots": [
+        "afternoon"
+      ],
+      "priority": 74,
+      "familyFriendly": false,
+      "budgetLevel": "medium",
+      "mealTypes": [],
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_OFFICIAL_LISTING"
+    },
+    {
+      "name": "Fish Lane Arts Precinct",
+      "category": "arts_precinct",
+      "area": "South Brisbane",
+      "addressLine": "Fish Lane, South Brisbane",
+      "latitude": -27.4736,
+      "longitude": 153.0173,
+      "stayMinutes": 60,
+      "styleTags": [
+        "art",
+        "laneway",
+        "food",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "West End Markets",
+      "category": "market",
+      "area": "West End",
+      "addressLine": "Davies Park, Montague Road, West End",
+      "latitude": -27.4799,
+      "longitude": 153.0007,
+      "stayMinutes": 90,
+      "styleTags": [
+        "market",
+        "food",
+        "local",
+        "shopping"
+      ],
+      "timeSlots": [
+        "morning"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Davies Park",
+      "category": "park",
+      "area": "West End",
+      "addressLine": "Montague Road, West End",
+      "latitude": -27.4797,
+      "longitude": 153.0011,
+      "stayMinutes": 45,
+      "styleTags": [
+        "park",
+        "local",
+        "family",
+        "river_nearby"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 68,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Orleigh Park",
+      "category": "park",
+      "area": "West End",
+      "addressLine": "Hill End Terrace, West End",
+      "latitude": -27.4826,
+      "longitude": 152.9959,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "park",
+        "family",
+        "relaxation"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "QUT Art Museum",
+      "category": "art_gallery",
+      "area": "Brisbane CBD",
+      "addressLine": "2 George Street, Brisbane City",
+      "latitude": -27.4768,
+      "longitude": 153.0281,
+      "stayMinutes": 60,
+      "styleTags": [
+        "art",
+        "culture",
+        "indoor",
+        "university"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 73,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "UQ Art Museum",
+      "category": "art_gallery",
+      "area": "St Lucia",
+      "addressLine": "University of Queensland, St Lucia",
+      "latitude": -27.4975,
+      "longitude": 153.0137,
+      "stayMinutes": 60,
+      "styleTags": [
+        "art",
+        "culture",
+        "university",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 73,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "The University of Queensland Great Court",
+      "category": "heritage_precinct",
+      "area": "St Lucia",
+      "addressLine": "University of Queensland, St Lucia",
+      "latitude": -27.497,
+      "longitude": 153.0132,
+      "stayMinutes": 45,
+      "styleTags": [
+        "architecture",
+        "heritage",
+        "university",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "UQ Lakes",
+      "category": "lake",
+      "area": "St Lucia",
+      "addressLine": "University of Queensland, St Lucia",
+      "latitude": -27.4991,
+      "longitude": 153.0158,
+      "stayMinutes": 45,
+      "styleTags": [
+        "nature",
+        "walking",
+        "relaxation",
+        "university"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Toowong Cemetery",
+      "category": "heritage_site",
+      "area": "Toowong",
+      "addressLine": "Frederick Street, Toowong",
+      "latitude": -27.4745,
+      "longitude": 152.9745,
+      "stayMinutes": 75,
+      "styleTags": [
+        "history",
+        "heritage",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Paddington Antique Centre",
+      "category": "shopping_precinct",
+      "area": "Paddington",
+      "addressLine": "167 Latrobe Terrace, Paddington",
+      "latitude": -27.459,
+      "longitude": 153.0016,
+      "stayMinutes": 60,
+      "styleTags": [
+        "shopping",
+        "heritage",
+        "vintage",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Victoria Park / Barrambin",
+      "category": "park",
+      "area": "Herston",
+      "addressLine": "Gilchrist Avenue, Herston",
+      "latitude": -27.4542,
+      "longitude": 153.0247,
+      "stayMinutes": 75,
+      "styleTags": [
+        "park",
+        "city_view",
+        "family",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 77,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Old Windmill Tower",
+      "category": "heritage_landmark",
+      "area": "Spring Hill",
+      "addressLine": "Wickham Terrace, Spring Hill",
+      "latitude": -27.4645,
+      "longitude": 153.0232,
+      "stayMinutes": 30,
+      "styleTags": [
+        "heritage",
+        "history",
+        "architecture"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Spring Hill Baths",
+      "category": "heritage_site",
+      "area": "Spring Hill",
+      "addressLine": "14 Torrington Street, Spring Hill",
+      "latitude": -27.4615,
+      "longitude": 153.025,
+      "stayMinutes": 45,
+      "styleTags": [
+        "heritage",
+        "swimming",
+        "local_history"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 68,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Miegunyah House Museum",
+      "category": "heritage_house",
+      "area": "Bowen Hills",
+      "addressLine": "35 Jordan Terrace, Bowen Hills",
+      "latitude": -27.4494,
+      "longitude": 153.0372,
+      "stayMinutes": 60,
+      "styleTags": [
+        "history",
+        "heritage",
+        "museum",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 69,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Walkabout Creek Discovery Centre",
+      "category": "nature_centre",
+      "area": "The Gap",
+      "addressLine": "60 Mount Nebo Road, The Gap",
+      "latitude": -27.4453,
+      "longitude": 152.9247,
+      "stayMinutes": 90,
+      "styleTags": [
+        "nature",
+        "education",
+        "family",
+        "wildlife"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Enoggera Reservoir",
+      "category": "lake",
+      "area": "The Gap",
+      "addressLine": "Walkabout Creek, The Gap",
+      "latitude": -27.4445,
+      "longitude": 152.9186,
+      "stayMinutes": 120,
+      "styleTags": [
+        "nature",
+        "water",
+        "walking",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "D'Aguilar National Park - Walkabout Creek Area",
+      "category": "national_park",
+      "area": "The Gap",
+      "addressLine": "Mount Nebo Road, The Gap",
+      "latitude": -27.44,
+      "longitude": 152.91,
+      "stayMinutes": 180,
+      "styleTags": [
+        "nature",
+        "walking",
+        "forest",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Mount Gravatt Outlook Reserve",
+      "category": "lookout",
+      "area": "Mount Gravatt",
+      "addressLine": "Shire Road, Mount Gravatt",
+      "latitude": -27.5465,
+      "longitude": 153.0775,
+      "stayMinutes": 60,
+      "styleTags": [
+        "view",
+        "nature",
+        "walking",
+        "lookout"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Toohey Forest Park",
+      "category": "nature_reserve",
+      "area": "Nathan",
+      "addressLine": "Toohey Forest, Nathan",
+      "latitude": -27.5452,
+      "longitude": 153.0598,
+      "stayMinutes": 90,
+      "styleTags": [
+        "nature",
+        "walking",
+        "forest",
+        "wildlife"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Whites Hill Reserve",
+      "category": "nature_reserve",
+      "area": "Camp Hill",
+      "addressLine": "Boundary Road, Camp Hill",
+      "latitude": -27.5,
+      "longitude": 153.0756,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "walking",
+        "family",
+        "wildlife"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Seven Hills Bushland Reserve",
+      "category": "nature_reserve",
+      "area": "Seven Hills",
+      "addressLine": "Seven Hills, Brisbane",
+      "latitude": -27.4829,
+      "longitude": 153.0748,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "walking",
+        "bushland"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Minnippi Parklands",
+      "category": "park",
+      "area": "Carina",
+      "addressLine": "Stanton Road West, Carina",
+      "latitude": -27.4891,
+      "longitude": 153.1028,
+      "stayMinutes": 75,
+      "styleTags": [
+        "park",
+        "wetland",
+        "family",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Colmslie Beach Reserve",
+      "category": "riverfront_park",
+      "area": "Morningside",
+      "addressLine": "Colmslie Road, Morningside",
+      "latitude": -27.4556,
+      "longitude": 153.0871,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "park",
+        "family",
+        "picnic"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Bulimba Riverside Park",
+      "category": "riverfront_park",
+      "area": "Bulimba",
+      "addressLine": "Quay Street, Bulimba",
+      "latitude": -27.4495,
+      "longitude": 153.0594,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "park",
+        "family",
+        "relaxation"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 69,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Oxford Street Bulimba",
+      "category": "shopping_precinct",
+      "area": "Bulimba",
+      "addressLine": "Oxford Street, Bulimba",
+      "latitude": -27.4492,
+      "longitude": 153.0577,
+      "stayMinutes": 75,
+      "styleTags": [
+        "shopping",
+        "food",
+        "local",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "New Farm Riverwalk",
+      "category": "river_walk",
+      "area": "New Farm",
+      "addressLine": "Brisbane River, New Farm",
+      "latitude": -27.4649,
+      "longitude": 153.0463,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "walking",
+        "city_view",
+        "outdoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Teneriffe Riverwalk",
+      "category": "river_walk",
+      "area": "Teneriffe",
+      "addressLine": "Teneriffe Boardwalk, Teneriffe",
+      "latitude": -27.4555,
+      "longitude": 153.0505,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "walking",
+        "heritage",
+        "outdoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Wynnum Mangrove Boardwalk",
+      "category": "boardwalk",
+      "area": "Wynnum",
+      "addressLine": "Wynnum North Road, Wynnum",
+      "latitude": -27.4336,
+      "longitude": 153.1744,
+      "stayMinutes": 60,
+      "styleTags": [
+        "coastal",
+        "nature",
+        "walking",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Wynnum Wading Pool",
+      "category": "coastal_pool",
+      "area": "Wynnum",
+      "addressLine": "Wynnum Esplanade, Wynnum",
+      "latitude": -27.442,
+      "longitude": 153.174,
+      "stayMinutes": 75,
+      "styleTags": [
+        "coastal",
+        "family",
+        "water",
+        "relaxation"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Manly Harbour Village",
+      "category": "harbour_precinct",
+      "area": "Manly",
+      "addressLine": "Cambridge Parade, Manly",
+      "latitude": -27.454,
+      "longitude": 153.1865,
+      "stayMinutes": 90,
+      "styleTags": [
+        "coastal",
+        "harbour",
+        "food",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    }
+  ]
+}

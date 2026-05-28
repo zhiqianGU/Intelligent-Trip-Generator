@@ -1,0 +1,40 @@
+{
+  "city": "Testville",
+  "country": "Testland",
+  "state": "TS",
+  "currency": "TST",
+  "pois": [
+    {
+      "name": "Testville Museum",
+      "category": "museum",
+      "area": "Central",
+      "addressLine": "2 Culture Road, Testville",
+      "latitude": 10.001,
+      "longitude": 20.001,
+      "stayMinutes": 75,
+      "styleTags": ["culture", "indoor"],
+      "timeSlots": ["morning", "afternoon"],
+      "priority": 95,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "source": "LOCAL_TEST",
+      "verificationLevel": "TEST"
+    },
+    {
+      "name": "Testville Riverside Park",
+      "category": "park",
+      "area": "Central",
+      "addressLine": "3 River Road, Testville",
+      "latitude": 10.002,
+      "longitude": 20.002,
+      "stayMinutes": 60,
+      "styleTags": ["nature", "family"],
+      "timeSlots": ["morning", "afternoon"],
+      "priority": 90,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_TEST",
+      "verificationLevel": "TEST"
+    }
+  ]
+}

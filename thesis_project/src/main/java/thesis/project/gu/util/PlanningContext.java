@@ -67,6 +67,7 @@ public final class PlanningContext {
                 - Style mix: %s.
                 - Before choosing concrete places, internally create a day skeleton with: primaryArea, nearbySecondaryArea, mainTheme, rough targetCounts, lunchIntent, and dinnerIntent. Do not output these extra skeleton fields; use them to choose coherent stops in the required JSON schema.
                 - Each day's lunchIntent and dinnerIntent must use the day skeleton's area and current route flow, not a random citywide restaurant area.
+                - If a day skeleton cannot realistically support the pace target under area constraints, downgrade target non-meal counts by one level (fast 4-5 -> moderate 3-4 -> relaxed 2-3). If even relaxed is not feasible, allow 1-2 high-quality non-meal stops and keep intentional free time.
                 - Market/shopping rule: %s
                 - Theme park rule: %s
                 - Single-style handling: %s
@@ -151,13 +152,22 @@ public final class PlanningContext {
     }
 
     private static String normalizedPace(CreatePlanReq req) {
-        return (req.pace() == null || req.pace().isBlank()) ? "normal" : req.pace().trim().toLowerCase(Locale.ROOT);
+        if (req.pace() == null || req.pace().isBlank()) {
+            return "normal";
+        }
+        String pace = req.pace().trim().toLowerCase(Locale.ROOT).replace("_", "-").replace(" ", "-");
+        return switch (pace) {
+            case "relax", "relaxed", "slow" -> "relaxed";
+            case "fast", "rush", "fast-pace", "fastpaced", "intense" -> "fast";
+            case "moderate", "normal", "medium" -> "normal";
+            default -> "normal";
+        };
     }
 
     private static String themeParkRule(String pace) {
         String dayTripPattern = switch (pace) {
             case "relaxed" -> "For relaxed pace, make the theme park day a simple day trip: one theme_park stop only, lunch in or near that remote cluster, and dinner either back in the hotel city or near the same cluster.";
-            case "rush", "fast" -> "For fast pace, the theme park day may include up to two short real nearby stops plus one theme_park stop, but all non-meal stops must stay in the same remote cluster.";
+            case "fast" -> "For fast pace, the theme park day may include up to two short real nearby stops plus one theme_park stop, but all non-meal stops must stay in the same remote cluster.";
             default -> "For moderate pace, the theme park day may include one real nearby stop of any suitable type plus one theme_park stop, but both must stay in the same remote cluster.";
         };
         return "If theme_park fits, include at most one theme park-style stop in the whole trip for 1-3 day trips, or at most two for 4+ day trips. "

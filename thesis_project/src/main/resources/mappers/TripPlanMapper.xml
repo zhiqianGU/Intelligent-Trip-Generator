@@ -37,6 +37,29 @@
           AND user_id = #{userId}
     </update>
 
+    <update id="updateDayCopy">
+        UPDATE trip_day d
+        INNER JOIN trip_plan p ON p.id = d.plan_id
+        SET d.note = #{note},
+            d.hotel_reason = #{hotelReason},
+            d.hotel_tip = #{hotelTip}
+        WHERE p.id = #{planId}
+          AND p.user_id = #{userId}
+          AND d.day_index = #{dayIndex}
+    </update>
+
+    <update id="updateStopCopy">
+        UPDATE trip_day_stop s
+        INNER JOIN trip_day d ON d.id = s.day_id
+        INNER JOIN trip_plan p ON p.id = d.plan_id
+        SET s.reason = #{reason},
+            s.tip = #{tip}
+        WHERE p.id = #{planId}
+          AND p.user_id = #{userId}
+          AND d.day_index = #{dayIndex}
+          AND s.seq = #{seq}
+    </update>
+
     <delete id="deletePlan">
         DELETE FROM trip_plan
         WHERE id = #{planId}

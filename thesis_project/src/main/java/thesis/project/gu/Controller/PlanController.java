@@ -2,6 +2,7 @@ package thesis.project.gu.Controller;
 
 import com.alibaba.dashscope.exception.InputRequiredException;
 import com.alibaba.dashscope.exception.NoApiKeyException;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -35,19 +37,27 @@ import thesis.project.gu.service.MapService;
 import thesis.project.gu.service.PlanPrewarmService;
 import thesis.project.gu.service.PlanProcessorService;
 import thesis.project.gu.service.PlanService;
+import thesis.project.gu.service.PlaceHeuristicService;
 import thesis.project.gu.service.RuntimeMetricsService;
 import thesis.project.gu.service.TripAiService;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
+import java.util.stream.Stream;
 
 @RestController
 @RequestMapping("/api/v1/plans")
@@ -61,7 +71,12 @@ public class PlanController {
     private final WeatherApiClient weatherApiClient;
     private final GooglePlacesClient googlePlacesClient;
     private final PlanProcessorService planProcessorService;
+    private final PlaceHeuristicService placeHeuristicService;
     private final ExecutorService routeExecutor;
+    private final com.github.benmanes.caffeine.cache.Cache<String, RouteDaySuggestion> routeSuggestionDayCache = Caffeine.newBuilder()
+            .maximumSize(1_000)
+            .expireAfterWrite(Duration.ofMinutes(30))
+            .build();
 
     public PlanController(
             PlanService planService,
@@ -73,6 +88,7 @@ public class PlanController {
             WeatherApiClient weatherApiClient,
             GooglePlacesClient googlePlacesClient,
             PlanProcessorService planProcessorService,
+            PlaceHeuristicService placeHeuristicService,
             @Qualifier("routeExecutor") ExecutorService routeExecutor
     ) {
         this.planService = planService;
@@ -84,19 +100,20 @@ public class PlanController {
         this.weatherApiClient = weatherApiClient;
         this.googlePlacesClient = googlePlacesClient;
         this.planProcessorService = planProcessorService;
+        this.placeHeuristicService = placeHeuristicService;
         this.routeExecutor = routeExecutor;
     }
 
     @PostMapping(value = "/draft", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public PlanDraftResponse draft(@RequestBody @Valid CreatePlanReq req)
+    public PlanDraftResponse draft(
+            @RequestBody @Valid CreatePlanReq req,
+            @RequestHeader(name = "X-Defer-Copy-Polish", required = false) Boolean deferCopyPolish
+    )
             throws Exception {
         long startedAt = System.currentTimeMillis();
         boolean redisHit = isAiPlanCacheHit(req);
         try {
-            long aiStartedAt = System.currentTimeMillis();
-            String raw = aiService.generatePlanRaw(req);
-            long aiGenerationMs = System.currentTimeMillis() - aiStartedAt;
-            PlanDraftResponse result = planProcessorService.processDraft(req, raw, redisHit, aiGenerationMs);
+            PlanDraftResponse result = planProcessorService.generateDraft(req, redisHit, Boolean.TRUE.equals(deferCopyPolish));
             runtimeMetricsService.recordPlanGenerateRequest("draft", redisHit, System.currentTimeMillis() - startedAt, true);
             return result;
         } catch (NoApiKeyException | InputRequiredException | JsonProcessingException e) {
@@ -108,27 +125,102 @@ public class PlanController {
         }
     }
 
-    @PostMapping(value = "/route-suggestions", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public RouteSuggestionsResponse routeSuggestions(@RequestBody RouteSuggestionsRequest request) {
+    @PostMapping(value = "/route-suggestions/day", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public RouteDaySuggestion routeSuggestionDay(@RequestBody RouteSuggestionDayRequest request) {
         PlanDraftResponse draft = request == null ? null : request.draft();
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return new RouteSuggestionsResponse(List.of());
+        Integer requestedDayIndex = request == null ? null : request.dayIndex();
+        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty() || requestedDayIndex == null) {
+            return new RouteDaySuggestion(requestedDayIndex == null ? 0 : requestedDayIndex, List.of());
         }
+        PlanDraftResponse.DayPlan day = draft.daysPlan().stream()
+                .filter(candidate -> candidate != null && candidate.dayIndex() == requestedDayIndex)
+                .findFirst()
+                .orElse(null);
+        if (day == null) {
+            return new RouteDaySuggestion(requestedDayIndex, List.of());
+        }
+        RouteRecommendationContext recommendationContext = routeRecommendationContext(
+                draft,
+                request == null ? null : request.departureDate()
+        );
+        return cachedRouteSuggestionForDay(draft, day, recommendationContext, request.departureDate());
+    }
 
-        RouteRecommendationContext recommendationContext = routeRecommendationContext(draft, request);
-        List<RouteDaySuggestion> days = new ArrayList<>();
-        for (PlanDraftResponse.DayPlan day : draft.daysPlan()) {
-            List<PlanDraftResponse.Place> stops = day.stops() == null ? List.of() : day.stops();
-            if (stops.size() < 2) {
-                days.add(new RouteDaySuggestion(day.dayIndex(), resolveHotelStartRouteSuggestion(day.dayIndex(), day, recommendationContext)));
-                continue;
-            }
-            List<StopCoordinate> coordinates = resolveStopCoordinatesInParallel(stops);
-            List<RouteSegmentSuggestion> segments = new ArrayList<>(resolveHotelStartRouteSuggestion(day.dayIndex(), day, recommendationContext));
-            segments.addAll(resolveRouteSuggestions(day.dayIndex(), stops, coordinates, recommendationContext));
-            days.add(new RouteDaySuggestion(day.dayIndex(), segments));
+    private RouteDaySuggestion cachedRouteSuggestionForDay(
+            PlanDraftResponse draft,
+            PlanDraftResponse.DayPlan day,
+            RouteRecommendationContext recommendationContext,
+            String departureDate
+    ) {
+        String cacheKey = routeSuggestionDayCacheKey(draft, day, departureDate);
+        if (cacheKey.isBlank()) {
+            return routeSuggestionForDay(draft, day, recommendationContext);
         }
-        return new RouteSuggestionsResponse(days);
+        return routeSuggestionDayCache.get(cacheKey, ignored -> routeSuggestionForDay(draft, day, recommendationContext));
+    }
+
+    private RouteDaySuggestion routeSuggestionForDay(
+            PlanDraftResponse draft,
+            PlanDraftResponse.DayPlan day,
+            RouteRecommendationContext recommendationContext
+    ) {
+        if (day == null) {
+            return new RouteDaySuggestion(0, List.of());
+        }
+        List<PlanDraftResponse.Place> stops = day.stops() == null ? List.of() : day.stops();
+        if (stops.size() < 2) {
+            return new RouteDaySuggestion(day.dayIndex(), resolveHotelStartRouteSuggestion(day.dayIndex(), day, recommendationContext));
+        }
+        List<StopCoordinate> coordinates = resolveStopCoordinatesInParallel(stops, shouldTrustDraftCoordinates(draft));
+        List<RouteSegmentSuggestion> segments = new ArrayList<>(resolveHotelStartRouteSuggestion(day.dayIndex(), day, recommendationContext));
+        segments.addAll(resolveRouteSuggestions(day.dayIndex(), stops, coordinates, recommendationContext));
+        return new RouteDaySuggestion(day.dayIndex(), segments);
+    }
+
+    private String routeSuggestionDayCacheKey(PlanDraftResponse draft, PlanDraftResponse.DayPlan day, String departureDate) {
+        if (draft == null || day == null) {
+            return "";
+        }
+        StringBuilder source = new StringBuilder(512)
+                .append("city=").append(nullToEmpty(draft.city()))
+                .append("|days=").append(draft.days())
+                .append("|pace=").append(nullToEmpty(draft.pace()))
+                .append("|kids=").append(draft.party() == null ? "" : draft.party().kids())
+                .append("|departure=").append(nullToEmpty(departureDate))
+                .append("|copy=").append(nullToEmpty(draft.copyPolishStatus()))
+                .append("|day=").append(day.dayIndex());
+        appendRouteCachePlace(source, "hotel", day.hotel());
+        if (day.stops() != null) {
+            for (int i = 0; i < day.stops().size(); i++) {
+                appendRouteCachePlace(source, "stop-" + i, day.stops().get(i));
+            }
+        }
+        return "route-suggestion-day:" + sha256Url(source.toString());
+    }
+
+    private void appendRouteCachePlace(StringBuilder source, String label, PlanDraftResponse.Place place) {
+        source.append('|').append(label).append('=');
+        if (place == null) {
+            source.append("null");
+            return;
+        }
+        source.append(nullToEmpty(place.name()))
+                .append('@').append(nullToEmpty(place.addressLine()))
+                .append('@').append(nullToEmpty(place.startTime()))
+                .append('-').append(nullToEmpty(place.endTime()))
+                .append('@').append(place.latitude() == null ? "" : roundCoordinate(place.latitude()))
+                .append(',')
+                .append(place.longitude() == null ? "" : roundCoordinate(place.longitude()));
+    }
+
+    private String sha256Url(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashed = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            return Base64.getUrlEncoder().withoutPadding().encodeToString(hashed);
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toHexString(value.hashCode());
+        }
     }
 
     @PostMapping(value = "/weather", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -138,20 +230,18 @@ public class PlanController {
                 || request.days() == null || request.days() < 1) {
             return new WeatherForecastResponse(false, List.of());
         }
-        WeatherApiClient.Forecast forecast = weatherApiClient.forecast(request.city(), request.departureDate(), request.days());
-        if (forecast == null || forecast.isEmpty()) {
-            return new WeatherForecastResponse(false, List.of());
-        }
         LocalDate departureDate = parseDate(request.departureDate());
         if (departureDate == null) {
             return new WeatherForecastResponse(false, List.of());
         }
+        WeatherApiClient.Forecast forecast = weatherApiClient.forecast(request.city(), request.departureDate(), request.days());
 
         List<WeatherDaySummary> days = new ArrayList<>();
         for (int i = 0; i < request.days(); i++) {
             LocalDate date = departureDate.plusDays(i);
-            WeatherApiClient.WeatherDay weatherDay = forecast.days().get(date.toString());
+            WeatherApiClient.WeatherDay weatherDay = forecast == null || forecast.isEmpty() ? null : forecast.days().get(date.toString());
             if (weatherDay == null) {
+                days.add(defaultSunnyWeatherDay(i + 1, date));
                 continue;
             }
             days.add(new WeatherDaySummary(
@@ -165,13 +255,26 @@ public class PlanController {
                     forecast.rainyAt(date, null)
             ));
         }
-        return new WeatherForecastResponse(!days.isEmpty(), days);
+        return new WeatherForecastResponse(true, days);
     }
 
-    private RouteRecommendationContext routeRecommendationContext(PlanDraftResponse draft, RouteSuggestionsRequest request) {
+    private WeatherDaySummary defaultSunnyWeatherDay(int dayIndex, LocalDate date) {
+        return new WeatherDaySummary(
+                dayIndex,
+                date == null ? "" : date.toString(),
+                "Sunny",
+                0,
+                null,
+                null,
+                null,
+                false
+        );
+    }
+
+    private RouteRecommendationContext routeRecommendationContext(PlanDraftResponse draft, String departureDateRaw) {
         int kids = draft.party() == null || draft.party().kids() == null ? 0 : draft.party().kids();
-        LocalDate departureDate = parseDate(request == null ? null : request.departureDate());
-        WeatherApiClient.Forecast forecast = weatherApiClient.forecast(draft.city(), request == null ? null : request.departureDate(), draft.days());
+        LocalDate departureDate = parseDate(departureDateRaw);
+        WeatherApiClient.Forecast forecast = weatherApiClient.forecast(draft.city(), departureDateRaw, draft.days());
         return new RouteRecommendationContext(kids > 0, departureDate, forecast);
     }
 
@@ -185,8 +288,9 @@ public class PlanController {
         }
         PlanDraftResponse.Place hotel = day.hotel();
         PlanDraftResponse.Place firstStop = day.stops().getFirst();
-        StopCoordinate hotelCoordinate = resolveStopCoordinateSafely(hotel);
-        StopCoordinate firstStopCoordinate = resolveStopCoordinateSafely(firstStop);
+        boolean trustDraftCoordinates = shouldTrustDraftCoordinates(day);
+        StopCoordinate hotelCoordinate = resolveStopCoordinateSafely(hotel, trustDraftCoordinates);
+        StopCoordinate firstStopCoordinate = resolveStopCoordinateSafely(firstStop, trustDraftCoordinates);
         List<StopCoordinate> coordinates = new ArrayList<>();
         coordinates.add(hotelCoordinate);
         coordinates.add(firstStopCoordinate);
@@ -344,9 +448,9 @@ public class PlanController {
         if (!fromArea.isBlank() && fromArea.equals(toArea)) {
             return true;
         }
-        String fromName = normalizeSearchText(fromStop.name());
-        String toName = normalizeSearchText(toStop.name());
-        return commonSignificantTokenCount(fromName, toName) > 0;
+        String fromName = placeHeuristicService.normalizeSearchText(fromStop.name());
+        String toName = placeHeuristicService.normalizeSearchText(toStop.name());
+        return placeHeuristicService.commonSignificantTokenCount(fromName, toName) > 0;
     }
 
     private boolean isThemeParkContinuationStop(PlanDraftResponse.Place stop) {
@@ -532,15 +636,13 @@ public class PlanController {
     @PostMapping("/raw")
     public Map<String, Object> generateRaw(
             @RequestBody @Valid CreatePlanReq req,
+            @RequestHeader(name = "X-Defer-Copy-Polish", required = false) Boolean deferCopyPolish,
             @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
     ) throws Exception {
         long startedAt = System.currentTimeMillis();
         boolean redisHit = isAiPlanCacheHit(req);
         try {
-            long aiStartedAt = System.currentTimeMillis();
-            String raw = aiService.generatePlanRaw(req);
-            long aiGenerationMs = System.currentTimeMillis() - aiStartedAt;
-            PlanDraftResponse draft = planProcessorService.processDraft(req, raw, redisHit, aiGenerationMs);
+            PlanDraftResponse draft = planProcessorService.generateDraft(req, redisHit, Boolean.TRUE.equals(deferCopyPolish));
 
             String preview;
             try {
@@ -569,6 +671,23 @@ public class PlanController {
             runtimeMetricsService.recordPlanGenerateRequest("raw", redisHit, System.currentTimeMillis() - startedAt, false);
             throw e;
         }
+    }
+
+    @PostMapping(value = "/copy-polish", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public PlanDraftResponse copyPolish(
+            @RequestBody CopyPolishRequest request,
+            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
+    ) {
+        PlanDraftResponse draft = request == null ? null : request.draft();
+        if (draft == null) {
+            return null;
+        }
+        PlanDraftResponse polished = planProcessorService.applyCopyPolishPatch(draft);
+        Long planId = request == null ? null : request.planId();
+        if (userId != null && planId != null && planId > 0 && polished != null) {
+            planService.updatePlanCopy(userId, planId, polished);
+        }
+        return polished;
     }
 
     @PatchMapping("/{planId}/favorite")
@@ -671,6 +790,13 @@ public class PlanController {
         return value == null ? "" : value;
     }
 
+    private String roundCoordinate(Double value) {
+        if (value == null) {
+            return "";
+        }
+        return String.format(Locale.ROOT, "%.5f", value);
+    }
+
     private boolean shouldRefreshCoordinate(PlanDraftResponse.Place stop) {
         if (stop == null) {
             return false;
@@ -681,7 +807,9 @@ public class PlanController {
         if (isThemeParkLikeStop(stop)) {
             return true;
         }
-        return isNavigationAnchorCandidate(stop.name()) || isParkStopForCoordinateRefresh(stop) || isStrongPoiCandidate(stop);
+        return placeHeuristicService.isNavigationAnchorCandidate(stop.name())
+                || placeHeuristicService.isParkStopForCoordinateRefresh(stop)
+                || isStrongPoiCandidate(stop);
     }
 
     private String safeStopName(PlanDraftResponse.Place stop) {
@@ -708,11 +836,15 @@ public class PlanController {
     }
 
     public List<StopCoordinate> resolveStopCoordinatesInParallel(List<PlanDraftResponse.Place> stops) {
+        return resolveStopCoordinatesInParallel(stops, false);
+    }
+
+    public List<StopCoordinate> resolveStopCoordinatesInParallel(List<PlanDraftResponse.Place> stops, boolean trustDraftCoordinates) {
         if (stops == null || stops.isEmpty()) {
             return List.of();
         }
         List<CompletableFuture<StopCoordinate>> futures = stops.stream()
-                .map(stop -> CompletableFuture.supplyAsync(() -> resolveStopCoordinateSafely(stop), routeExecutor))
+                .map(stop -> CompletableFuture.supplyAsync(() -> resolveStopCoordinateSafely(stop, trustDraftCoordinates), routeExecutor))
                 .toList();
         return futures.stream().map(this::joinNullable).toList();
     }
@@ -742,13 +874,24 @@ public class PlanController {
     }
 
     public StopCoordinate resolveStopCoordinateSafely(PlanDraftResponse.Place stop) {
-        StopLocation location = resolveStopLocationSafely(stop);
+        return resolveStopCoordinateSafely(stop, false);
+    }
+
+    public StopCoordinate resolveStopCoordinateSafely(PlanDraftResponse.Place stop, boolean trustDraftCoordinates) {
+        StopLocation location = resolveStopLocationSafely(stop, trustDraftCoordinates);
         return location == null ? null : new StopCoordinate(location.lat(), location.lon());
     }
 
     private StopLocation resolveStopLocationSafely(PlanDraftResponse.Place stop) {
+        return resolveStopLocationSafely(stop, false);
+    }
+
+    private StopLocation resolveStopLocationSafely(PlanDraftResponse.Place stop, boolean trustDraftCoordinates) {
         StopLocation existingLocation = existingStopLocation(stop);
         try {
+            if (trustDraftCoordinates && existingLocation != null) {
+                return existingLocation;
+            }
             if (stop != null && stop.latitude() != null && stop.longitude() != null && !shouldRefreshCoordinate(stop)) {
                 return existingLocation;
             }
@@ -758,13 +901,13 @@ public class PlanController {
 
             if (isStrongPoiCandidate(stop)) {
                 StopLocation placesLocation = resolveStrongPoiLocationWithPlaces(stop);
-                if (placesLocation != null && isCoordinatePlausibleForCity(new StopCoordinate(placesLocation.lat(), placesLocation.lon()), stop.city())) {
+                if (placesLocation != null && placeHeuristicService.isCoordinatePlausibleForCity(new StopCoordinate(placesLocation.lat(), placesLocation.lon()), stop.city())) {
                     return placesLocation;
                 }
             }
-            if (isNavigationAnchorCandidate(stop.name())) {
+            if (placeHeuristicService.isNavigationAnchorCandidate(stop.name())) {
                 StopLocation placesLocation = resolveNavigationAnchorLocationWithPlaces(stop);
-                if (placesLocation != null && isCoordinatePlausibleForCity(new StopCoordinate(placesLocation.lat(), placesLocation.lon()), stop.city())) {
+                if (placesLocation != null && placeHeuristicService.isCoordinatePlausibleForCity(new StopCoordinate(placesLocation.lat(), placesLocation.lon()), stop.city())) {
                     return placesLocation;
                 }
             }
@@ -772,17 +915,19 @@ public class PlanController {
             GeoResponse response = null;
             if (isRouteSuggestionOptional(stop) && stop != null && stop.name() != null && !stop.name().isBlank()) {
                 response = mapService.geocodeWithoutBackfill(stop.name(), stop.city());
-                StopCoordinate coordinate = coordinateFromGeocode(response);
-                if (coordinate != null && isCoordinatePlausibleForCity(coordinate, stop.city())) {
+                StopCoordinate coordinate = placeHeuristicService.coordinateFromGeocode(response);
+                if (coordinate != null && placeHeuristicService.isCoordinatePlausibleForCity(coordinate, stop.city())) {
                     return new StopLocation(coordinate.lat(), coordinate.lon(), null);
                 }
             }
 
-            List<String> candidates = geocodeCandidates(stop);
+            boolean navigationAnchorCandidate = placeHeuristicService.isNavigationAnchorCandidate(stop.name())
+                    || placeHeuristicService.isParkStopForCoordinateRefresh(stop);
+            List<String> candidates = placeHeuristicService.geocodeCandidates(stop, isStrongPoiCandidate(stop), navigationAnchorCandidate);
             for (String candidate : candidates) {
                 response = mapService.geocode(candidate, stop.city());
-                StopCoordinate coordinate = coordinateFromGeocode(response);
-                if (coordinate != null && isCoordinatePlausibleForCity(coordinate, stop.city())) {
+                StopCoordinate coordinate = placeHeuristicService.coordinateFromGeocode(response);
+                if (coordinate != null && placeHeuristicService.isCoordinatePlausibleForCity(coordinate, stop.city())) {
                     return new StopLocation(coordinate.lat(), coordinate.lon(), null);
                 }
             }
@@ -797,10 +942,32 @@ public class PlanController {
             return null;
         }
         StopCoordinate coordinate = new StopCoordinate(stop.latitude(), stop.longitude());
-        if (!isCoordinatePlausibleForCity(coordinate, stop.city())) {
+        if (!placeHeuristicService.isCoordinatePlausibleForCity(coordinate, stop.city())) {
             return null;
         }
         return new StopLocation(stop.latitude(), stop.longitude(), null);
+    }
+
+    private boolean shouldTrustDraftCoordinates(PlanDraftResponse draft) {
+        if (draft == null) {
+            return false;
+        }
+        String status = draft.copyPolishStatus() == null ? "" : draft.copyPolishStatus().trim().toLowerCase(Locale.ROOT);
+        return "deferred".equals(status)
+                || "local-fast".equals(status)
+                || status.startsWith("local-fast");
+    }
+
+    private boolean shouldTrustDraftCoordinates(PlanDraftResponse.DayPlan day) {
+        if (day == null) {
+            return false;
+        }
+        return Stream.concat(
+                        Stream.of(day.hotel()),
+                        day.stops() == null ? Stream.empty() : day.stops().stream()
+                )
+                .filter(Objects::nonNull)
+                .anyMatch(stop -> stop.latitude() != null && stop.longitude() != null);
     }
 
     private StopLocation resolveNavigationAnchorLocationWithPlaces(PlanDraftResponse.Place stop) {
@@ -810,7 +977,7 @@ public class PlanController {
         for (String query : navigationAnchorPlaceSearchQueries(stop)) {
             StopLocation location = googlePlacesClient.searchText(query, stop.city()).stream()
                     .filter(candidate -> Double.isFinite(candidate.lat()) && Double.isFinite(candidate.lng()))
-                    .filter(candidate -> isCoordinatePlausibleForCity(new StopCoordinate(candidate.lat(), candidate.lng()), stop.city()))
+                    .filter(candidate -> placeHeuristicService.isCoordinatePlausibleForCity(new StopCoordinate(candidate.lat(), candidate.lng()), stop.city()))
                     .map(candidate -> new RankedPlaceCoordinate(candidate, scoreNavigationAnchorCandidate(stop, candidate)))
                     .filter(candidate -> candidate.score() >= 120)
                     .sorted((a, b) -> Integer.compare(b.score(), a.score()))
@@ -835,7 +1002,7 @@ public class PlanController {
         for (String query : strongPoiPlaceSearchQueries(stop)) {
             StopLocation location = googlePlacesClient.searchText(query, stop.city()).stream()
                     .filter(candidate -> Double.isFinite(candidate.lat()) && Double.isFinite(candidate.lng()))
-                    .filter(candidate -> isCoordinatePlausibleForCity(new StopCoordinate(candidate.lat(), candidate.lng()), stop.city()))
+                    .filter(candidate -> placeHeuristicService.isCoordinatePlausibleForCity(new StopCoordinate(candidate.lat(), candidate.lng()), stop.city()))
                     .map(candidate -> new RankedPlaceCoordinate(candidate, scoreStrongPoiPlaceCandidate(stop, candidate)))
                     .filter(candidate -> isAcceptableStrongPoiPlaceCandidate(stop, candidate))
                     .sorted((a, b) -> Integer.compare(b.score(), a.score()))
@@ -856,7 +1023,7 @@ public class PlanController {
     private List<String> strongPoiPlaceSearchQueries(PlanDraftResponse.Place stop) {
         List<String> queries = new ArrayList<>();
         String name = stop.name() == null ? "" : stop.name().trim();
-        String coreName = corePoiName(name);
+        String coreName = placeHeuristicService.corePoiName(name);
         String address = stop.addressLine() == null ? "" : stop.addressLine().trim();
         if (!coreName.isBlank() && !address.isBlank()) {
             addUnique(queries, coreName + ", " + address);
@@ -886,30 +1053,21 @@ public class PlanController {
         return queries;
     }
 
-    private String corePoiName(String name) {
-        if (name == null) {
-            return "";
-        }
-        String cleaned = name.trim();
-        String[] parts = cleaned.split("\\s+(?:-|\\||:)\\s*");
-        return parts.length == 0 ? cleaned : parts[0].trim();
-    }
-
     private boolean isAcceptableStrongPoiPlaceCandidate(PlanDraftResponse.Place stop, RankedPlaceCoordinate ranked) {
         if (ranked == null || ranked.candidate() == null || ranked.score() < 120) {
             return false;
         }
-        String expectedName = normalizeSearchText(stop.name());
-        String candidateName = normalizeSearchText(ranked.candidate().name());
+        String expectedName = placeHeuristicService.normalizeSearchText(stop.name());
+        String candidateName = placeHeuristicService.normalizeSearchText(ranked.candidate().name());
         if (!expectedName.isBlank()
                 && !candidateName.isBlank()
                 && !(candidateName.contains(expectedName) || expectedName.contains(candidateName))) {
             return false;
         }
-        String expectedAddress = normalizeSearchText(stop.addressLine());
+        String expectedAddress = placeHeuristicService.normalizeSearchText(stop.addressLine());
         if (hasSpecificAddressAnchor(expectedAddress)) {
-            String candidateAddress = normalizeSearchText(ranked.candidate().formattedAddress());
-            return commonSignificantTokenCount(expectedAddress, candidateAddress) > 0;
+            String candidateAddress = placeHeuristicService.normalizeSearchText(ranked.candidate().formattedAddress());
+            return placeHeuristicService.commonSignificantTokenCount(expectedAddress, candidateAddress) > 0;
         }
         return true;
     }
@@ -919,7 +1077,7 @@ public class PlanController {
             return false;
         }
         for (String token : expectedAddress.split("\\s+")) {
-            if (token.length() >= 4 && !isLowSignalPoiToken(token)) {
+            if (token.length() >= 4 && !placeHeuristicService.isLowSignalPoiToken(token)) {
                 return true;
             }
         }
@@ -927,11 +1085,11 @@ public class PlanController {
     }
 
     private int scoreStrongPoiPlaceCandidate(PlanDraftResponse.Place stop, GooglePlacesClient.PlaceCandidate candidate) {
-        String expectedName = normalizeSearchText(stop.name());
-        String expectedAddress = normalizeSearchText(stop.addressLine());
-        String candidateText = normalizeSearchText(candidate.name() + " " + candidate.formattedAddress() + " " + String.join(" ", candidate.types()));
-        int score = commonSignificantTokenCount(expectedName, candidateText) * 80;
-        score += commonSignificantTokenCount(expectedAddress, candidateText) * 15;
+        String expectedName = placeHeuristicService.normalizeSearchText(stop.name());
+        String expectedAddress = placeHeuristicService.normalizeSearchText(stop.addressLine());
+        String candidateText = placeHeuristicService.normalizeSearchText(candidate.name() + " " + candidate.formattedAddress() + " " + String.join(" ", candidate.types()));
+        int score = placeHeuristicService.commonSignificantTokenCount(expectedName, candidateText) * 80;
+        score += placeHeuristicService.commonSignificantTokenCount(expectedAddress, candidateText) * 15;
         String types = String.join(" ", candidate.types()).toLowerCase(Locale.ROOT);
         if (types.contains("museum") || types.contains("tourist_attraction") || types.contains("art_gallery")) {
             score += 80;
@@ -943,9 +1101,9 @@ public class PlanController {
     }
 
     private int scoreNavigationAnchorCandidate(PlanDraftResponse.Place stop, GooglePlacesClient.PlaceCandidate candidate) {
-        String expectedName = normalizeSearchText(stop.name());
-        String candidateText = normalizeSearchText(candidate.name() + " " + candidate.formattedAddress() + " " + String.join(" ", candidate.types()));
-        int score = commonSignificantTokenCount(expectedName, candidateText) * 70;
+        String expectedName = placeHeuristicService.normalizeSearchText(stop.name());
+        String candidateText = placeHeuristicService.normalizeSearchText(candidate.name() + " " + candidate.formattedAddress() + " " + String.join(" ", candidate.types()));
+        int score = placeHeuristicService.commonSignificantTokenCount(expectedName, candidateText) * 70;
         String types = String.join(" ", candidate.types()).toLowerCase(Locale.ROOT);
         if (types.contains("tourist_attraction")
                 || types.contains("point_of_interest")
@@ -953,86 +1111,11 @@ public class PlanController {
                 || types.contains("park")) {
             score += 50;
         }
-        String candidateName = normalizeSearchText(candidate.name());
+        String candidateName = placeHeuristicService.normalizeSearchText(candidate.name());
         if (!expectedName.isBlank() && !candidateName.isBlank() && (expectedName.contains(candidateName) || candidateName.contains(expectedName))) {
             score += 80;
         }
         return score;
-    }
-
-    private int commonSignificantTokenCount(String left, String right) {
-        if (left == null || left.isBlank() || right == null || right.isBlank()) {
-            return 0;
-        }
-        int count = 0;
-        for (String token : left.split("\\s+")) {
-            if (token.length() < 4 || isLowSignalPoiToken(token)) {
-                continue;
-            }
-            if (right.contains(token)) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    private boolean isLowSignalPoiToken(String token) {
-        return "the".equals(token)
-                || "and".equals(token)
-                || "australia".equals(token)
-                || "sydney".equals(token)
-                || "melbourne".equals(token)
-                || "brisbane".equals(token)
-                || "victoria".equals(token)
-                || "south".equals(token)
-                || "north".equals(token);
-    }
-
-    private String normalizeSearchText(String value) {
-        return value == null
-                ? ""
-                : value.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
-    }
-
-    private List<String> geocodeCandidates(PlanDraftResponse.Place stop) {
-        List<String> candidates = new ArrayList<>();
-        if (stop == null) {
-            return candidates;
-        }
-        String rawAddress = stop.addressLine() == null ? "" : stop.addressLine().trim();
-        String name = stop.name() == null ? "" : stop.name().trim();
-        boolean navigationAnchorCandidate = isNavigationAnchorCandidate(name) || isParkStopForCoordinateRefresh(stop);
-        boolean strongPoiCandidate = isStrongPoiCandidate(stop);
-        if (strongPoiCandidate && !name.isBlank()) {
-            if (!rawAddress.isBlank() && !rawAddress.toLowerCase().contains(name.toLowerCase())) {
-                addUnique(candidates, corePoiName(name) + ", " + rawAddress);
-                addUnique(candidates, name + ", " + rawAddress);
-            }
-            if (stop.city() != null && !stop.city().isBlank()) {
-                addUnique(candidates, corePoiName(name) + ", " + stop.city().trim());
-                addUnique(candidates, name + ", " + stop.city().trim());
-            }
-            addUnique(candidates, corePoiName(name));
-            addUnique(candidates, name);
-        } else if (navigationAnchorCandidate && !name.isBlank()) {
-            addUnique(candidates, name);
-            if (stop.city() != null && !stop.city().isBlank()) {
-                addUnique(candidates, name + ", " + stop.city().trim());
-            }
-        }
-        if (!rawAddress.isBlank()) {
-            addUnique(candidates, rawAddress);
-            if (!name.isBlank() && !rawAddress.toLowerCase().contains(name.toLowerCase())) {
-                addUnique(candidates, name + ", " + rawAddress);
-            }
-        }
-        if (!navigationAnchorCandidate && !strongPoiCandidate && !name.isBlank()) {
-            addUnique(candidates, name);
-            if (stop.city() != null && !stop.city().isBlank()) {
-                addUnique(candidates, name + ", " + stop.city().trim());
-            }
-        }
-        return candidates;
     }
 
     private boolean isStrongPoiCandidate(PlanDraftResponse.Place stop) {
@@ -1054,56 +1137,6 @@ public class PlanController {
                 || name.contains("monument");
     }
 
-    private boolean isNavigationAnchorCandidate(String name) {
-        if (name == null || name.isBlank()) {
-            return false;
-        }
-        String text = name.toLowerCase();
-        return text.contains("harbour")
-                || text.contains("parklands")
-                || text.contains("botanic")
-                || text.contains("garden")
-                || text.contains("lookout")
-                || text.contains("wharf")
-                || text.contains("wharves")
-                || text.contains("quay")
-                || text.contains("pier")
-                || text.contains("landmark")
-                || text.contains("summit")
-                || text.contains("mount ")
-                || text.contains("mt ")
-                || text.contains("beach")
-                || text.contains("reserve")
-                || text.contains("riverwalk")
-                || text.contains("waterfront")
-                || text.contains("precinct")
-                || text.contains("trail")
-                || text.contains("national park");
-    }
-
-    private boolean isParkStopForCoordinateRefresh(PlanDraftResponse.Place stop) {
-        if (stop == null || stop.name() == null || stop.name().isBlank()) {
-            return false;
-        }
-        String name = stop.name().toLowerCase();
-        if (!name.matches(".*\\bpark\\b.*")) {
-            return false;
-        }
-        if (name.matches(".*\\b(car park|parking|parkroyal|park hotel|hotel|restaurant|cafe|bar)\\b.*")) {
-            return false;
-        }
-        String category = normalizeSlot(stop.category());
-        return "park".equals(category)
-                || "nature".equals(category)
-                || "attraction".equals(category)
-                || "outdoor".equals(category)
-                || name.contains("national park")
-                || name.contains("reserve")
-                || name.contains("garden")
-                || name.contains("lookout")
-                || name.contains("beach");
-    }
-
     private void addUnique(List<String> values, String value) {
         if (value == null || value.isBlank()) {
             return;
@@ -1113,45 +1146,6 @@ public class PlanController {
         if (!exists) {
             values.add(normalized);
         }
-    }
-
-    private StopCoordinate coordinateFromGeocode(GeoResponse response) {
-        if (response == null || response.features() == null || response.features().isEmpty()) {
-            return null;
-        }
-        GeoResponse.Feature feature = response.features().getFirst();
-        if (feature == null || feature.properties() == null) {
-            return null;
-        }
-        Double lat = feature.properties().lat();
-        Double lon = feature.properties().lon();
-        if ((lat == null || lon == null) && feature.geometry() != null && feature.geometry().coordinates() != null && feature.geometry().coordinates().size() >= 2) {
-            lon = feature.geometry().coordinates().get(0);
-            lat = feature.geometry().coordinates().get(1);
-        }
-        if (lat == null || lon == null) {
-            return null;
-        }
-        return new StopCoordinate(lat, lon);
-    }
-
-    private boolean isCoordinatePlausibleForCity(StopCoordinate coordinate, String city) {
-        if (coordinate == null || city == null || city.isBlank()) {
-            return true;
-        }
-        String normalizedCity = city.trim().toLowerCase();
-        double lat = coordinate.lat();
-        double lon = coordinate.lon();
-        if ("brisbane".equals(normalizedCity)) {
-            return lat >= -28.2 && lat <= -26.8 && lon >= 152.4 && lon <= 153.7;
-        }
-        if ("sydney".equals(normalizedCity)) {
-            return lat >= -34.4 && lat <= -33.2 && lon >= 150.5 && lon <= 151.6;
-        }
-        if ("melbourne".equals(normalizedCity)) {
-            return lat >= -38.5 && lat <= -37.2 && lon >= 144.2 && lon <= 145.6;
-        }
-        return true;
     }
 
     private int parseTimeMinutes(String value) {
@@ -1227,9 +1221,9 @@ public class PlanController {
 
     private record RankedPlaceCoordinate(GooglePlacesClient.PlaceCandidate candidate, int score) {}
 
-    public record RouteSuggestionsRequest(PlanDraftResponse draft, Integer budget, String departureDate) {}
+    public record RouteSuggestionDayRequest(PlanDraftResponse draft, Integer dayIndex, Integer budget, String departureDate) {}
 
-    public record RouteSuggestionsResponse(List<RouteDaySuggestion> days) {}
+    public record CopyPolishRequest(Long planId, PlanDraftResponse draft) {}
 
     public record WeatherForecastRequest(String city, String departureDate, Integer days) {}
 

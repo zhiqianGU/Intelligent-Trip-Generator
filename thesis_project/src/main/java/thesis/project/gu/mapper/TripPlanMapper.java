@@ -40,6 +40,20 @@ public interface TripPlanMapper {
 
     int updateTitle(long planId, long userId, String title);
 
+    int updateDayCopy(@Param("planId") long planId,
+                      @Param("userId") long userId,
+                      @Param("dayIndex") int dayIndex,
+                      @Param("note") String note,
+                      @Param("hotelReason") String hotelReason,
+                      @Param("hotelTip") String hotelTip);
+
+    int updateStopCopy(@Param("planId") long planId,
+                       @Param("userId") long userId,
+                       @Param("dayIndex") int dayIndex,
+                       @Param("seq") int seq,
+                       @Param("reason") String reason,
+                       @Param("tip") String tip);
+
     int deletePlan(@Param("planId") long planId, @Param("userId") long userId);
 
     List<PlaceDetail> findPlacesByIds(@Param("placeIds") List<Long> placeIds);

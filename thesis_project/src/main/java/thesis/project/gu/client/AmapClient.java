@@ -101,10 +101,10 @@ public class AmapClient {
                         }
                     }
                 } else {
-                    log.warn("City lookup HTTP {}: {}", cityResp.statusCode(), cityResp.body());
-                }
-            } catch (Exception ex) {
-                log.warn("City lookup failed, fallback without proximity bias", ex);
+                log.debug("City lookup HTTP {}: {}", cityResp.statusCode(), cityResp.body());
+            }
+        } catch (Exception ex) {
+                log.debug("City lookup failed, fallback without proximity bias", ex);
             }
         }
 
@@ -136,7 +136,7 @@ public class AmapClient {
 
             if (code != 200) {
                 runtimeMetricsService.recordExternalGeocode(System.currentTimeMillis() - startedAt, false);
-                log.info("external_api category=geocode status=fail duration_ms={} http_status={}",
+                log.debug("external_api category=geocode status=fail duration_ms={} http_status={}",
                         System.currentTimeMillis() - startedAt, code);
                 throw new NavigatorException(ErrorCode.GEOCODE_FAIL, "Geoapify HTTP " + code + ": " + body);
             }
@@ -144,26 +144,26 @@ public class AmapClient {
             GeoResponse result = objectMapper.readValue(body, GeoResponse.class);
             if (result == null || result.features() == null || result.features().isEmpty()) {
                 runtimeMetricsService.recordExternalGeocode(System.currentTimeMillis() - startedAt, false);
-                log.info("external_api category=geocode status=empty duration_ms={}",
+                log.debug("external_api category=geocode status=empty duration_ms={}",
                         System.currentTimeMillis() - startedAt);
                 throw new NavigatorException(ErrorCode.GEOCODE_FAIL, "Geoapify geocoding failed: empty result");
             }
 
             runtimeMetricsService.recordExternalGeocode(System.currentTimeMillis() - startedAt, true);
-            log.info("external_api category=geocode status=success duration_ms={}",
+            log.debug("external_api category=geocode status=success duration_ms={}",
                     System.currentTimeMillis() - startedAt);
             return result;
         } catch (IOException | InterruptedException e) {
             runtimeMetricsService.recordExternalGeocode(System.currentTimeMillis() - startedAt, false);
-            log.info("external_api category=geocode status=exception duration_ms={}",
+            log.debug("external_api category=geocode status=exception duration_ms={}",
                     System.currentTimeMillis() - startedAt);
-            log.error("Geoapify geocode failed", e);
+            log.debug("Geoapify geocode failed", e);
             throw new NavigatorException(ErrorCode.GEOCODE_FAIL);
         }
     }
 
     private GeoResponse geocodeFallback(String address, @Nullable String city, Throwable cause) {
-        log.warn("Geoapify geocode degraded address={} city={} reason={}", address, city, cause.toString());
+        log.debug("Geoapify geocode degraded address={} city={} reason={}", address, city, cause.toString());
         throw new NavigatorException(ErrorCode.GEOCODE_FAIL, "Geoapify geocoding unavailable: " + cause.getMessage());
     }
 
@@ -179,25 +179,25 @@ public class AmapClient {
 
             if (!resp.getStatusCode().is2xxSuccessful()) {
                 runtimeMetricsService.recordExternalRoute(System.currentTimeMillis() - startedAt, false);
-                log.info("external_api category=route mode={} status=fail duration_ms={} http_status={}",
+                log.debug("external_api category=route mode={} status=fail duration_ms={} http_status={}",
                         mode, System.currentTimeMillis() - startedAt, resp.getStatusCodeValue());
                 throw new NavigatorException(ErrorCode.ROUTE_FAIL, "Geoapify HTTP " + resp.getStatusCodeValue() + ": " + resp.getBody());
             }
 
             GeoRouteResponse result = objectMapper.readValue(resp.getBody(), GeoRouteResponse.class);
             runtimeMetricsService.recordExternalRoute(System.currentTimeMillis() - startedAt, true);
-            log.info("external_api category=route mode={} status=success duration_ms={}",
+            log.debug("external_api category=route mode={} status=success duration_ms={}",
                     mode, System.currentTimeMillis() - startedAt);
             return result;
         } catch (IOException e) {
             runtimeMetricsService.recordExternalRoute(System.currentTimeMillis() - startedAt, false);
-            log.info("external_api category=route mode={} status=parse_error duration_ms={}",
+            log.debug("external_api category=route mode={} status=parse_error duration_ms={}",
                     mode, System.currentTimeMillis() - startedAt);
             throw new NavigatorException(ErrorCode.INTERNAL_ERROR, "Parse Geoapify route failed: " + e.getMessage());
         } catch (RuntimeException e) {
             if (!(e instanceof NavigatorException)) {
                 runtimeMetricsService.recordExternalRoute(System.currentTimeMillis() - startedAt, false);
-                log.info("external_api category=route mode={} status=exception duration_ms={}",
+                log.debug("external_api category=route mode={} status=exception duration_ms={}",
                         mode, System.currentTimeMillis() - startedAt);
             }
             throw e;
@@ -205,7 +205,7 @@ public class AmapClient {
     }
 
     private GeoRouteResponse routeFallback(String mode, String originLatLon, String destLatLon, Throwable cause) {
-        log.warn("Geoapify route degraded mode={} origin={} destination={} reason={}",
+        log.debug("Geoapify route degraded mode={} origin={} destination={} reason={}",
                 mode, originLatLon, destLatLon, cause.toString());
         try {
             return directLineFallback(originLatLon, destLatLon, mode);
@@ -278,14 +278,14 @@ public class AmapClient {
                 try {
                     JsonNode result = objectMapper.readTree(body);
                     runtimeMetricsService.recordExternalSummary(System.currentTimeMillis() - startedAt, true);
-                    log.info("external_api category=summary mode={} status=success duration_ms={} attempts={}",
+                    log.debug("external_api category=summary mode={} status=success duration_ms={} attempts={}",
                             mode, System.currentTimeMillis() - startedAt, attempts);
                     return result;
                 } catch (IOException e) {
                     runtimeMetricsService.recordExternalSummary(System.currentTimeMillis() - startedAt, false);
-                    log.info("external_api category=summary mode={} status=parse_error duration_ms={} attempts={}",
+                    log.debug("external_api category=summary mode={} status=parse_error duration_ms={} attempts={}",
                             mode, System.currentTimeMillis() - startedAt, attempts);
-                    log.warn("Parse summary failed", e);
+                    log.debug("Parse summary failed", e);
                     return null;
                 }
             }
@@ -300,14 +300,14 @@ public class AmapClient {
             }
 
             runtimeMetricsService.recordExternalSummary(System.currentTimeMillis() - startedAt, false);
-            log.info("external_api category=summary mode={} status=fail duration_ms={} http_status={} attempts={}",
+            log.debug("external_api category=summary mode={} status=fail duration_ms={} http_status={} attempts={}",
                     mode, System.currentTimeMillis() - startedAt, code, attempts);
             return null;
         }
     }
 
     private JsonNode routeRawFallback(String mode, String originLatLon, String destLatLon, Throwable cause) {
-        log.warn("Geoapify route summary degraded mode={} origin={} destination={} reason={}",
+        log.debug("Geoapify route summary degraded mode={} origin={} destination={} reason={}",
                 mode, originLatLon, destLatLon, cause.toString());
         return null;
     }

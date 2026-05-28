@@ -21,6 +21,7 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import org.springframework.transaction.annotation.Transactional;
 import thesis.project.gu.config.AiMockProperties;
 import thesis.project.gu.config.AiProperties;
@@ -37,10 +38,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.*;
 
 import static com.alibaba.dashscope.utils.Constants.apiKey;
@@ -49,13 +53,30 @@ import static thesis.project.gu.service.MapService.safe;
 //测试接口
 @Service
 public class TripAiService {
-    public TripAiService(AiProperties aiProps, AiMockProperties aiMockProps, TripPlanMapper planMapper, PlaceMapper placeMapper, JdbcTemplate jdbc, RuntimeMetricsService runtimeMetricsService) {
+    private static final int PLAN_MAX_TOKENS = 8192;
+    private static final int RETRY_MAX_TOKENS_SHORT = 7168;
+    private static final int RETRY_MAX_TOKENS_MEDIUM = 6144;
+    private static final int RETRY_MAX_TOKENS_LONG = 5120;
+    private static final int RETRY_MAX_TOKENS_XLONG = 4608;
+    private static final String PHASED_DAY_CONCURRENCY_FLAG = "itrip.ai.phased.day.concurrency.max";
+    private static final int DEFAULT_PHASED_DAY_CONCURRENCY = 5;
+
+    public TripAiService(
+            AiProperties aiProps,
+            AiMockProperties aiMockProps,
+            TripPlanMapper planMapper,
+            PlaceMapper placeMapper,
+            JdbcTemplate jdbc,
+            RuntimeMetricsService runtimeMetricsService,
+            DaySkeletonService daySkeletonService
+    ) {
         this.aiProps = aiProps;
         this.aiMockProps = aiMockProps;
         this.planMapper = planMapper;
         this.placeMapper = placeMapper;
         this.jdbc = jdbc;
         this.runtimeMetricsService = runtimeMetricsService;
+        this.daySkeletonService = daySkeletonService;
     }
     private static final Logger log = LoggerFactory.getLogger(TripAiService.class);
     private final AiProperties aiProps;
@@ -66,27 +87,165 @@ public class TripAiService {
     private final PlaceMapper placeMapper;
     private final JdbcTemplate jdbc;
     private final RuntimeMetricsService runtimeMetricsService;
+    private final DaySkeletonService daySkeletonService;
+    private final ExecutorService phasedDayExecutor = Executors.newFixedThreadPool(
+            phasedDayConcurrencyLimit(),
+            runnable -> {
+                Thread thread = new Thread(runnable);
+                thread.setName("trip-ai-phased-day");
+                thread.setDaemon(true);
+                return thread;
+            }
+    );
+    private final Semaphore phasedDayBulkhead = new Semaphore(phasedDayConcurrencyLimit(), true);
+
     @PostConstruct
     public void init() {
-        // DashScope SDK 读取这里的 key
-        if ("qwen".equals(aiProps.resolvedProvider())) {
-            apiKey = aiProps.key();
-        }
         ensureStyleTags();
+        log.info("Trip AI phased-day concurrency max={}", phasedDayConcurrencyLimit());
+    }
+
+    @PreDestroy
+    public void destroy() {
+        phasedDayExecutor.shutdownNow();
     }
 
     @CircuitBreaker(name = "llmProvider", fallbackMethod = "generatePlanRawFallback")
     @RateLimiter(name = "llmProvider", fallbackMethod = "generatePlanRawFallback")
     public String generatePlanRaw(CreatePlanReq req)
             throws ApiException, NoApiKeyException, InputRequiredException, JsonProcessingException {
-        return generatePlanRawInternal(req, null);
+        String daySkeletonHints = daySkeletonService.toPromptHints(daySkeletonService.build(req, null));
+        return generatePlanRawInternal(req, null, daySkeletonHints);
+    }
+
+    @CircuitBreaker(name = "llmProvider", fallbackMethod = "generatePlanRawPhasedFallback")
+    @RateLimiter(name = "llmProvider", fallbackMethod = "generatePlanRawPhasedFallback")
+    public String generatePlanRawPhased(CreatePlanReq req)
+            throws ApiException, NoApiKeyException, InputRequiredException, JsonProcessingException {
+        if (aiMockProps.isMockEnabled()) {
+            String path = aiMockProps.resolvedMockRawPath();
+            log.info("AI phased raw generation using mock sample path={}", path);
+            return loadMockRaw(path);
+        }
+
+        DaySkeletonService.DaySkeletonBatch skeletonBatch = daySkeletonService.build(req, null);
+        List<DaySkeletonService.DaySkeleton> skeletons = skeletonBatch == null || skeletonBatch.skeletons() == null
+                ? List.of()
+                : skeletonBatch.skeletons();
+        if (skeletons.isEmpty()) {
+            return generatePlanRaw(req);
+        }
+
+        try {
+            List<CompletableFuture<PhasedDayResult>> futures = skeletons.stream()
+                    .filter(Objects::nonNull)
+                    .sorted(java.util.Comparator.comparingInt(DaySkeletonService.DaySkeleton::dayIndex))
+                    .map(skeleton -> supplyAsyncPhasedDayTask(() -> generateSingleDayPlan(req, skeletonBatch, skeleton, Map.of())))
+                    .toList();
+
+            List<PhasedDayResult> dayResults = new java.util.ArrayList<>();
+            for (CompletableFuture<PhasedDayResult> future : futures) {
+                dayResults.add(future.join());
+            }
+            dayResults.sort(java.util.Comparator.comparingInt(PhasedDayResult::dayIndex));
+
+            PlanDraftResponse merged = mergePhasedDayResults(req, dayResults);
+            return mapper.writeValueAsString(merged);
+        } catch (CompletionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException("Phased itinerary generation failed", cause);
+        }
     }
 
     @CircuitBreaker(name = "llmProvider", fallbackMethod = "regeneratePlanRawFallback")
     @RateLimiter(name = "llmProvider", fallbackMethod = "regeneratePlanRawFallback")
-    public String regeneratePlanRaw(CreatePlanReq req, String retryInstruction)
+    public String regeneratePlanRaw(CreatePlanReq req, String retryInstruction, @Nullable String daySkeletonHints)
             throws ApiException, NoApiKeyException, InputRequiredException, JsonProcessingException {
-        return generatePlanRawInternal(req, retryInstruction);
+        return generatePlanRawInternal(req, retryInstruction, daySkeletonHints);
+    }
+
+    @CircuitBreaker(name = "llmProvider", fallbackMethod = "regeneratePlanDaysPhasedFallback")
+    @RateLimiter(name = "llmProvider", fallbackMethod = "regeneratePlanDaysPhasedFallback")
+    public PlanDraftResponse regeneratePlanDaysPhased(
+            CreatePlanReq req,
+            PlanDraftResponse baseDraft,
+            List<Integer> targetDayIndexes,
+            Map<Integer, String> retryInstructionsByDay
+    ) throws ApiException, NoApiKeyException, InputRequiredException, JsonProcessingException {
+        if (baseDraft == null || baseDraft.daysPlan() == null || baseDraft.daysPlan().isEmpty()
+                || targetDayIndexes == null || targetDayIndexes.isEmpty()) {
+            return baseDraft;
+        }
+
+        DaySkeletonService.DaySkeletonBatch skeletonBatch = daySkeletonService.build(req, baseDraft);
+        Map<Integer, DaySkeletonService.DaySkeleton> skeletonsByDay = skeletonBatch == null || skeletonBatch.skeletons() == null
+                ? Map.of()
+                : skeletonBatch.skeletons().stream().collect(java.util.stream.Collectors.toMap(
+                        DaySkeletonService.DaySkeleton::dayIndex,
+                        skeleton -> skeleton,
+                        (left, right) -> left,
+                        java.util.LinkedHashMap::new
+                ));
+        try {
+            Set<Integer> targetDays = targetDayIndexes.stream()
+                    .filter(Objects::nonNull)
+                    .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+            Map<String, String> usedPoiSet = usedNonMealPoisFromBaseDraft(baseDraft, targetDays);
+            Map<Integer, PlanDraftResponse.DayPlan> replacements = new java.util.LinkedHashMap<>();
+            for (Integer dayIndex : targetDays.stream().sorted().toList()) {
+                PhasedDayResult result = regenerateSingleDayPlan(
+                        req,
+                        skeletonBatch,
+                        skeletonsByDay.get(dayIndex),
+                        dayIndex,
+                        retryInstructionsByDay == null ? null : retryInstructionsByDay.get(dayIndex),
+                        usedPoiSet
+                );
+                replacements.put(result.dayIndex(), result.dayPlan());
+                rememberUsedNonMealPois(result.dayPlan(), usedPoiSet);
+            }
+            return mergeRegeneratedDays(baseDraft, replacements);
+        } catch (CompletionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException("Phased day-level retry failed", cause);
+        }
+    }
+
+    private <T> CompletableFuture<T> supplyAsyncPhasedDayTask(Callable<T> task) {
+        return CompletableFuture.supplyAsync(() -> {
+            boolean acquired = false;
+            try {
+                phasedDayBulkhead.acquire();
+                acquired = true;
+                return task.call();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new CompletionException(new IllegalStateException("Interrupted while waiting for phased AI day slot", e));
+            } catch (RuntimeException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            } finally {
+                if (acquired) {
+                    phasedDayBulkhead.release();
+                }
+            }
+        }, phasedDayExecutor);
+    }
+
+    private static int phasedDayConcurrencyLimit() {
+        String raw = System.getProperty(PHASED_DAY_CONCURRENCY_FLAG, String.valueOf(DEFAULT_PHASED_DAY_CONCURRENCY));
+        try {
+            return Math.max(1, Integer.parseInt(raw.trim()));
+        } catch (RuntimeException ex) {
+            return DEFAULT_PHASED_DAY_CONCURRENCY;
+        }
     }
 
     private String generatePlanRawFallback(CreatePlanReq req, Throwable cause) {
@@ -98,13 +257,39 @@ public class TripAiService {
         throw new IllegalStateException("AI itinerary generation is temporarily unavailable", cause);
     }
 
-    private String regeneratePlanRawFallback(CreatePlanReq req, String retryInstruction, Throwable cause) {
+    private String generatePlanRawPhasedFallback(CreatePlanReq req, Throwable cause) {
+        log.warn("LLM phased raw generation degraded city={} days={} model={} reason={} details={}",
+                req == null ? null : req.city(),
+                req == null ? null : req.days(),
+                req == null ? null : req.mainModel(),
+                cause.toString(),
+                cause instanceof ApiException ? ((ApiException) cause).getMessage() : "none");
+        throw new IllegalStateException("AI phased itinerary generation is temporarily unavailable", cause);
+    }
+
+    private String regeneratePlanRawFallback(CreatePlanReq req, String retryInstruction, @Nullable String daySkeletonHints, Throwable cause) {
         log.warn("LLM retry generation degraded city={} days={} model={} reason={}",
                 req == null ? null : req.city(),
                 req == null ? null : req.days(),
                 req == null ? null : req.mainModel(),
                 cause.toString());
         throw new IllegalStateException("AI itinerary retry generation is temporarily unavailable", cause);
+    }
+
+    private PlanDraftResponse regeneratePlanDaysPhasedFallback(
+            CreatePlanReq req,
+            PlanDraftResponse baseDraft,
+            List<Integer> targetDayIndexes,
+            Map<Integer, String> retryInstructionsByDay,
+            Throwable cause
+    ) {
+        log.warn("LLM phased retry generation degraded city={} days={} model={} retryDays={} reason={}",
+                req == null ? null : req.city(),
+                req == null ? null : req.days(),
+                req == null ? null : req.mainModel(),
+                targetDayIndexes,
+                cause.toString());
+        throw new IllegalStateException("AI phased itinerary retry is temporarily unavailable", cause);
     }
 
     public CopyPolishResult polishPlanCopy(PlanDraftResponse verifiedDraft) {
@@ -205,10 +390,11 @@ public class TripAiService {
             return toPlanDraftPatch(verifiedDraft, patch);
         }
 
-        Constants.baseHttpApiUrl = "https://dashscope-intl.aliyuncs.com/api/v1";
-        String key = apiKey;
+        Constants.baseHttpApiUrl = resolvedQwenBaseUrl();
+        String key = aiProps.key();
         if (key == null || key.isBlank()) throw new IllegalStateException("API_KEY is not configured");
         key = key.trim();
+        log.info("Qwen API key (copy polish)={}", key);
 
         Message sys = Message.builder().role(Role.SYSTEM.getValue()).content(system).build();
         Message usr = Message.builder().role(Role.USER.getValue()).content(user).build();
@@ -218,6 +404,7 @@ public class TripAiService {
                 .model(aiProps.resolvedCopyPolishModel())
                 .messages(List.of(sys, usr))
                 .resultFormat(GenerationParam.ResultFormat.MESSAGE)
+                .maxTokens(4096)
                 .build();
 
         GenerationResult result = new Generation().call(param);
@@ -333,9 +520,8 @@ public class TripAiService {
                 .replaceAll("```\\s*$", "");
     }
 
-    private String generatePlanRawInternal(CreatePlanReq req, @Nullable String retryInstruction)
+    private String generatePlanRawInternal(CreatePlanReq req, @Nullable String retryInstruction, @Nullable String daySkeletonHints)
             throws ApiException, NoApiKeyException, InputRequiredException, JsonProcessingException {
-        long startedAt = System.currentTimeMillis();
         if (aiMockProps.isMockEnabled()) {
             String path = retryInstruction == null || retryInstruction.isBlank()
                     ? aiMockProps.resolvedMockRawPath()
@@ -345,21 +531,32 @@ public class TripAiService {
         }
 
         // ①（可留）如果你用国际站：
-        Constants.baseHttpApiUrl = "https://dashscope-intl.aliyuncs.com/api/v1";
+        Constants.baseHttpApiUrl = resolvedQwenBaseUrl();
 
         // ② 组装消息（用你之前发我的模板类）
         String system = TripPromptTemplate.system();
-        String user = TripPromptTemplate.user(req);
+        String user = TripPromptTemplate.user(req, daySkeletonHints);
+        if (retryInstruction == null || retryInstruction.isBlank()) {
+            log.debug("Initial generation day skeleton seed: {}", daySkeletonHints);
+        }
         if (retryInstruction != null && !retryInstruction.isBlank()) {
             user = user + "\n\nRetry correction:\n" + retryInstruction.trim();
         }
 
+        return generateRawFromPrompt(req, system, user, retryInstruction != null && !retryInstruction.isBlank());
+    }
+
+    private String generateRawFromPrompt(CreatePlanReq req, String system, String user, boolean retryMode)
+            throws ApiException, NoApiKeyException, InputRequiredException, JsonProcessingException {
+        long startedAt = System.currentTimeMillis();
+
         String mainProvider = resolvedMainProvider(req);
         String mainModel = resolvedMainModel(req);
+        int maxTokens = resolvePlanMaxTokens(req, retryMode);
 
         if ("gemini".equals(mainProvider)) {
             try {
-                String content = callGemini(system, user, mainModel);
+                String content = callGemini(system, user, mainModel, maxTokens);
                 runtimeMetricsService.recordExternalPlanGenerate(System.currentTimeMillis() - startedAt, true);
                 return content;
             } catch (RuntimeException e) {
@@ -368,10 +565,11 @@ public class TripAiService {
             }
         }
 
-        apiKey = aiProps.key();
-        String key = apiKey;
+        Constants.baseHttpApiUrl = resolvedQwenBaseUrl();
+        String key = aiProps.key();
         if (key == null || key.isBlank()) throw new IllegalStateException("API_KEY is not configured");
         key = key.trim();
+        log.info("Qwen API key (plan raw)={}", key);
 
         Message sys = Message.builder().role(Role.SYSTEM.getValue()).content(system).build();
         Message usr = Message.builder().role(Role.USER.getValue()).content(user).build();
@@ -381,6 +579,7 @@ public class TripAiService {
                 .model(mainModel)
                 .messages(List.of(sys, usr))
                 .resultFormat(GenerationParam.ResultFormat.MESSAGE)
+                .maxTokens(maxTokens)
                 .build();
 
         Generation gen = new Generation();
@@ -398,6 +597,400 @@ public class TripAiService {
             throw e;
         }
     }
+
+    private int resolvePlanMaxTokens(CreatePlanReq req, boolean retryMode) {
+        if (!retryMode) {
+            return PLAN_MAX_TOKENS;
+        }
+        int days = req == null ? 0 : Math.max(1, req.days());
+        if (days >= 10) {
+            return RETRY_MAX_TOKENS_XLONG;
+        }
+        if (days >= 7) {
+            return RETRY_MAX_TOKENS_LONG;
+        }
+        if (days >= 4) {
+            return RETRY_MAX_TOKENS_MEDIUM;
+        }
+        return RETRY_MAX_TOKENS_SHORT;
+    }
+
+    private PhasedDayResult generateSingleDayPlan(
+            CreatePlanReq req,
+            DaySkeletonService.DaySkeletonBatch skeletonBatch,
+            DaySkeletonService.DaySkeleton skeleton,
+            Map<String, String> usedPoiSet
+    ) {
+        try {
+            String currentSkeleton = formatCurrentDaySkeleton(skeleton);
+            String adjacentContext = adjacentDayContext(skeletonBatch, skeleton.dayIndex());
+            String system = TripPromptTemplate.system();
+            String user = TripPromptTemplate.dayUser(
+                    req,
+                    skeleton.dayIndex(),
+                    req.days(),
+                    currentSkeleton,
+                    adjacentContext,
+                    formatUsedPoiHints(usedPoiSet)
+            );
+            return generatePhasedDayResult(req, system, user, skeleton.dayIndex(), "initial");
+        } catch (ApiException | NoApiKeyException | InputRequiredException | JsonProcessingException e) {
+            throw new CompletionException(e);
+        } catch (RuntimeException e) {
+            throw new CompletionException(e);
+        }
+    }
+
+    private PhasedDayResult regenerateSingleDayPlan(
+            CreatePlanReq req,
+            DaySkeletonService.DaySkeletonBatch skeletonBatch,
+            @Nullable DaySkeletonService.DaySkeleton skeleton,
+            int dayIndex,
+            @Nullable String retryInstruction,
+            Map<String, String> usedPoiSet
+    ) {
+        try {
+            String currentSkeleton = formatCurrentDaySkeleton(resolveFallbackSkeleton(skeletonBatch, skeleton, dayIndex));
+            String adjacentContext = adjacentDayContext(skeletonBatch, dayIndex);
+            String system = TripPromptTemplate.system();
+            String user = TripPromptTemplate.dayUser(
+                    req,
+                    dayIndex,
+                    req.days(),
+                    currentSkeleton,
+                    adjacentContext,
+                    formatUsedPoiHints(usedPoiSet)
+            );
+            if (retryInstruction != null && !retryInstruction.isBlank()) {
+                user = user + "\n\nRetry correction for day " + dayIndex + ":\n" + retryInstruction.trim();
+            }
+            return generatePhasedDayResult(req, system, user, dayIndex, "retry");
+        } catch (ApiException | NoApiKeyException | InputRequiredException | JsonProcessingException e) {
+            throw new CompletionException(e);
+        } catch (RuntimeException e) {
+            throw new CompletionException(e);
+        }
+    }
+
+    private PhasedDayResult generatePhasedDayResult(
+            CreatePlanReq req,
+            String system,
+            String user,
+            int dayIndex,
+            String phaseLabel
+    ) throws ApiException, NoApiKeyException, InputRequiredException, JsonProcessingException {
+            String raw = generateRawFromPrompt(req, system, user, false);
+        try {
+            return parsePhasedDayResult(raw, dayIndex, phaseLabel);
+        } catch (JsonProcessingException parseFailure) {
+            log.warn("Phased day {} generation returned invalid JSON. city={} day={} error={} rawPreview={}",
+                    phaseLabel,
+                    req == null ? null : req.city(),
+                    dayIndex,
+                    parseFailure.getOriginalMessage(),
+                    shortRawPreview(raw));
+            String repairUser = user + "\n\nRetry correction for day " + dayIndex + ":\n"
+                    + invalidJsonRetryInstructionForDay(dayIndex, parseFailure);
+            String repairedRaw = generateRawFromPrompt(req, system, repairUser, true);
+            return parsePhasedDayResult(repairedRaw, dayIndex, phaseLabel + "-json-repair");
+        }
+    }
+
+    private PhasedDayResult parsePhasedDayResult(
+            String raw,
+            int dayIndex,
+            String phaseLabel
+    ) throws JsonProcessingException {
+        PlanDraftResponse parsed = mapper.readValue(stripJsonFence(raw), PlanDraftResponse.class);
+        PlanDraftResponse.DayPlan dayPlan = extractRequestedDayPlan(parsed, dayIndex);
+        if (dayPlan == null) {
+            throw new IllegalStateException("Phased day " + phaseLabel + " returned no matching dayIndex=" + dayIndex);
+        }
+        return new PhasedDayResult(
+                dayIndex,
+                copyDayPlanWithIndex(dayPlan, dayIndex),
+                firstNonBlank(parsed.country(), dayPlan.hotel() == null ? null : dayPlan.hotel().country(), firstStopCountry(dayPlan)),
+                firstNonBlank(parsed.currency(), null),
+                firstNonBlank(parsed.title(), null),
+                firstNonBlank(parsed.overview(), null)
+        );
+    }
+
+    private String invalidJsonRetryInstructionForDay(int dayIndex, JsonProcessingException parseFailure) {
+        String reason = parseFailure == null || parseFailure.getOriginalMessage() == null
+                ? "malformed json"
+                : parseFailure.getOriginalMessage();
+        return "The previous response for day " + dayIndex + " was invalid JSON and could not be parsed (" + reason + "). "
+                + "Return exactly one complete valid JSON object with one day in daysPlan. "
+                + "Do not truncate output. Close every quote, bracket, and brace. "
+                + "Ensure all string fields such as addressLine, preferredArea, reason, tip, theme, and note are properly quoted and escaped. "
+                + "Do not include markdown fences or commentary.";
+    }
+
+    private String shortRawPreview(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String compact = raw.replaceAll("\\s+", " ").trim();
+        if (compact.length() <= 240) {
+            return compact;
+        }
+        return compact.substring(0, 237) + "...";
+    }
+
+    private PlanDraftResponse mergePhasedDayResults(CreatePlanReq req, List<PhasedDayResult> dayResults) {
+        List<PlanDraftResponse.DayPlan> days = dayResults.stream()
+                .map(PhasedDayResult::dayPlan)
+                .toList();
+        String country = dayResults.stream()
+                .map(PhasedDayResult::country)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse("Australia");
+        String currency = dayResults.stream()
+                .map(PhasedDayResult::currency)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse("AUD");
+        String title = dayResults.stream()
+                .map(PhasedDayResult::title)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse(buildFallbackTitle(req));
+        String overview = dayResults.stream()
+                .map(PhasedDayResult::overview)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse(buildFallbackOverview(req));
+        return new PlanDraftResponse(
+                req.city(),
+                country,
+                req.days(),
+                currency,
+                req.party(),
+                req.pace(),
+                title,
+                overview,
+                days,
+                null
+        );
+    }
+
+    private PlanDraftResponse.DayPlan extractRequestedDayPlan(PlanDraftResponse parsed, int requestedDayIndex) {
+        if (parsed == null || parsed.daysPlan() == null || parsed.daysPlan().isEmpty()) {
+            return null;
+        }
+        for (PlanDraftResponse.DayPlan day : parsed.daysPlan()) {
+            if (day != null && day.dayIndex() == requestedDayIndex) {
+                return day;
+            }
+        }
+        PlanDraftResponse.DayPlan firstDay = parsed.daysPlan().getFirst();
+        return firstDay == null ? null : copyDayPlanWithIndex(firstDay, requestedDayIndex);
+    }
+
+    private PlanDraftResponse.DayPlan copyDayPlanWithIndex(PlanDraftResponse.DayPlan dayPlan, int dayIndex) {
+        if (dayPlan == null) {
+            return null;
+        }
+        return new PlanDraftResponse.DayPlan(
+                dayIndex,
+                dayPlan.hotel(),
+                dayPlan.stops(),
+                dayPlan.theme(),
+                dayPlan.morningNote(),
+                dayPlan.afternoonNote(),
+                dayPlan.eveningNote(),
+                dayPlan.note()
+        );
+    }
+
+    private String formatCurrentDaySkeleton(DaySkeletonService.DaySkeleton skeleton) {
+        if (skeleton == null) {
+            return "none";
+        }
+        String issue = skeleton.capacityIssueCode() == null || skeleton.capacityIssueCode().isBlank()
+                ? ""
+                : ",capacityIssue=" + skeleton.capacityIssueCode();
+        return "day-" + skeleton.dayIndex()
+                + "{primaryArea=" + safeSkeletonValue(skeleton.primaryArea())
+                + ",secondaryArea=" + safeSkeletonValue(skeleton.nearbySecondaryArea())
+                + ",effectiveNonMeal=" + skeleton.effectiveMinNonMealStops() + "-" + skeleton.effectiveMaxNonMealStops()
+                + issue
+                + "}";
+    }
+
+    private DaySkeletonService.DaySkeleton resolveFallbackSkeleton(
+            DaySkeletonService.DaySkeletonBatch batch,
+            @Nullable DaySkeletonService.DaySkeleton skeleton,
+            int dayIndex
+    ) {
+        if (skeleton != null) {
+            return skeleton;
+        }
+        if (batch == null || batch.skeletons() == null) {
+            return null;
+        }
+        return batch.skeletons().stream()
+                .filter(candidate -> candidate != null && candidate.dayIndex() == dayIndex)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String adjacentDayContext(DaySkeletonService.DaySkeletonBatch batch, int dayIndex) {
+        if (batch == null || batch.skeletons() == null || batch.skeletons().isEmpty()) {
+            return "";
+        }
+        List<String> context = new java.util.ArrayList<>();
+        for (DaySkeletonService.DaySkeleton skeleton : batch.skeletons()) {
+            if (skeleton == null || Math.abs(skeleton.dayIndex() - dayIndex) > 1 || skeleton.dayIndex() == dayIndex) {
+                continue;
+            }
+            context.add("day-" + skeleton.dayIndex()
+                    + "{primaryArea=" + safeSkeletonValue(skeleton.primaryArea())
+                    + ",effectiveNonMeal=" + skeleton.effectiveMinNonMealStops() + "-" + skeleton.effectiveMaxNonMealStops()
+                    + "}");
+        }
+        return String.join("; ", context);
+    }
+
+    private Map<String, String> usedNonMealPoisFromBaseDraft(PlanDraftResponse draft, Set<Integer> excludedDayIndexes) {
+        Map<String, String> usedPoiSet = new LinkedHashMap<>();
+        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
+            return usedPoiSet;
+        }
+        for (PlanDraftResponse.DayPlan day : draft.daysPlan()) {
+            if (day == null || (excludedDayIndexes != null && excludedDayIndexes.contains(day.dayIndex()))) {
+                continue;
+            }
+            rememberUsedNonMealPois(day, usedPoiSet);
+        }
+        return usedPoiSet;
+    }
+
+    private void rememberUsedNonMealPois(@Nullable PlanDraftResponse.DayPlan day, Map<String, String> usedPoiSet) {
+        if (day == null || day.stops() == null || day.stops().isEmpty() || usedPoiSet == null) {
+            return;
+        }
+        for (PlanDraftResponse.Place stop : day.stops()) {
+            if (!isTrackedNonMealPoi(stop)) {
+                continue;
+            }
+            String key = normalizePoiName(stop.name());
+            if (key.isBlank()) {
+                continue;
+            }
+            usedPoiSet.putIfAbsent(key, stop.name().trim());
+        }
+    }
+
+    private boolean isTrackedNonMealPoi(@Nullable PlanDraftResponse.Place stop) {
+        if (stop == null) {
+            return false;
+        }
+        String category = normalizePoiName(stop.category());
+        if (category.contains("restaurant") || category.contains("food") || category.contains("cafe") || category.contains("dining")) {
+            return false;
+        }
+        String timeSlot = normalizePoiName(stop.timeSlot());
+        return !timeSlot.equals("lunch") && !timeSlot.equals("dinner");
+    }
+
+    private String normalizePoiName(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().replaceAll("\\s+", " ").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String formatUsedPoiHints(Map<String, String> usedPoiSet) {
+        if (usedPoiSet == null || usedPoiSet.isEmpty()) {
+            return "none";
+        }
+        return usedPoiSet.values().stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .limit(20)
+                .collect(java.util.stream.Collectors.joining("; "));
+    }
+
+    private String safeSkeletonValue(String value) {
+        return value == null || value.isBlank() ? "n/a" : value;
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
+    private String firstStopCountry(PlanDraftResponse.DayPlan dayPlan) {
+        if (dayPlan == null || dayPlan.stops() == null || dayPlan.stops().isEmpty()) {
+            return "";
+        }
+        for (PlanDraftResponse.Place stop : dayPlan.stops()) {
+            if (stop != null && stop.country() != null && !stop.country().isBlank()) {
+                return stop.country();
+            }
+        }
+        return "";
+    }
+
+    private String buildFallbackTitle(CreatePlanReq req) {
+        int days = req == null ? 0 : Math.max(1, req.days());
+        String city = req == null || req.city() == null || req.city().isBlank() ? "Trip" : req.city().trim();
+        return city + " " + days + "-Day Itinerary";
+    }
+
+    private String buildFallbackOverview(CreatePlanReq req) {
+        int days = req == null ? 0 : Math.max(1, req.days());
+        String city = req == null || req.city() == null || req.city().isBlank() ? "the city" : req.city().trim();
+        return "A practical " + days + "-day itinerary in " + city + ".";
+    }
+
+    private PlanDraftResponse mergeRegeneratedDays(
+            PlanDraftResponse baseDraft,
+            Map<Integer, PlanDraftResponse.DayPlan> replacements
+    ) {
+        if (baseDraft == null || baseDraft.daysPlan() == null || baseDraft.daysPlan().isEmpty() || replacements == null || replacements.isEmpty()) {
+            return baseDraft;
+        }
+        List<PlanDraftResponse.DayPlan> mergedDays = baseDraft.daysPlan().stream()
+                .map(day -> {
+                    if (day == null) {
+                        return null;
+                    }
+                    PlanDraftResponse.DayPlan replacement = replacements.get(day.dayIndex());
+                    return replacement == null ? day : replacement;
+                })
+                .toList();
+        return new PlanDraftResponse(
+                baseDraft.city(),
+                baseDraft.country(),
+                baseDraft.days(),
+                baseDraft.currency(),
+                baseDraft.party(),
+                baseDraft.pace(),
+                baseDraft.title(),
+                baseDraft.overview(),
+                mergedDays,
+                baseDraft.copyPolishStatus()
+        );
+    }
+
+    private record PhasedDayResult(
+            int dayIndex,
+            PlanDraftResponse.DayPlan dayPlan,
+            String country,
+            String currency,
+            String title,
+            String overview
+    ) {}
 
     private String resolvedMainProvider(CreatePlanReq req) {
         String model = normalizedMainModel(req);
@@ -418,11 +1011,21 @@ public class TripAiService {
         return aiProps.resolvedModel();
     }
 
+    private String resolvedQwenBaseUrl() {
+        String configured = aiProps.baseUrl();
+        return (configured == null || configured.isBlank())
+                ? "https://dashscope-intl.aliyuncs.com/api/v1"
+                : configured.trim();
+    }
+
     private String normalizedMainModel(CreatePlanReq req) {
         if (req == null || req.mainModel() == null) {
             return "";
         }
         String model = req.mainModel().trim().toLowerCase();
+        if (model.startsWith("qwen-plus-") || model.startsWith("qwen-max-")) {
+            return model;
+        }
         return switch (model) {
             case "qwen-max", "qwen-plus", "gemini-2.5-flash" -> model;
             default -> "";
@@ -449,6 +1052,10 @@ public class TripAiService {
     }
 
     private String callGemini(String system, String user, String model) {
+        return callGemini(system, user, model, PLAN_MAX_TOKENS);
+    }
+
+    private String callGemini(String system, String user, String model, int maxOutputTokens) {
         String key = aiProps.resolvedGeminiKey();
         if (key == null || key.isBlank()) {
             throw new IllegalStateException("GEMINI_API_KEY is not configured");
@@ -470,7 +1077,8 @@ public class TripAiService {
                     )),
                     "generationConfig", Map.of(
                             "temperature", 0.25,
-                            "responseMimeType", "application/json"
+                            "responseMimeType", "application/json",
+                            "maxOutputTokens", maxOutputTokens
                     )
             );
 
@@ -592,9 +1200,9 @@ public class TripAiService {
 
     private static String translatePace(String pace) {
         return switch (pace.toLowerCase()) {
-            case "relaxed" -> "舒缓";
-            case "rush"    -> "紧凑";
-            default        -> "适中";
+            case "relax", "relaxed" -> "舒缓";
+            case "rush", "fast", "fast-pace" -> "紧凑";
+            default -> "适中";
         };
     }
     private static String formatAddress(String addressLine, String suburb, String city, String state, String postcode, String country) {
@@ -730,9 +1338,11 @@ public class TripAiService {
                 .filter(s -> !s.isBlank())
                 .orElse(draftPace);
         if (pace == null || pace.isBlank()) return "normal";
-        return switch (pace.trim().toLowerCase()) {
-            case "relaxed" -> "relaxed";
-            case "rush", "fast" -> "rush";
+        String normalized = pace.trim().toLowerCase().replace("_", "-").replace(" ", "-");
+        return switch (normalized) {
+            case "relax", "relaxed", "slow" -> "relaxed";
+            case "rush", "fast", "fast-pace", "fastpaced", "intense" -> "rush";
+            case "moderate", "normal", "medium" -> "normal";
             default -> "normal";
         };
     }

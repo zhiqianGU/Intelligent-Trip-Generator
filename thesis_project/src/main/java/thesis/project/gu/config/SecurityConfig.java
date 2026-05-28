@@ -45,7 +45,7 @@ public class SecurityConfig {
                         // allow your index.html and favicon
                         .requestMatchers("/", "/index.html", "/map.html", "/analysis-dashboard.html", "/favicon.ico").permitAll()
                         // public map and auth endpoints
-                        .requestMatchers("/api/v1/map/**", "/api/v1/analysis/**", "/auth/**", "/api/v1/plans/raw", "/api/v1/plans/draft", "/api/v1/plans/route-suggestions", "/api/v1/plans/weather", "/api/v1/cache/**").permitAll()
+                        .requestMatchers("/api/v1/map/**", "/api/v1/analysis/**", "/auth/**", "/api/v1/plans/raw", "/api/v1/plans/draft", "/api/v1/plans/route-suggestions/day", "/api/v1/plans/weather", "/api/v1/cache/**").permitAll()
                         // everything under /api/v1/user/** needs a JWT
                         .requestMatchers("/api/v1/user/**","/api/v1/plans/me/**", "/api/v1/plans/**","/api/v1/plans/{planId}/favorite").authenticated()
                         .anyRequest().denyAll()

@@ -200,6 +200,29 @@ public class AuthService {
         }
     }
 
+    @Transactional
+    public long resetPassword(String login, String rawPassword) {
+        UserIdentifier identifier = identifierMapper.findByIdentifierAny(login);
+        Long userId;
+        if (identifier != null) {
+            userId = identifier.getUserId();
+        } else {
+            AppUser namedUser = appUserMapper.findByDisplayName(login);
+            userId = namedUser != null ? namedUser.getId() : null;
+        }
+        if (userId == null) {
+            throw ErrorCode.NOT_FOUND.ex("User not found");
+        }
+
+        int affected = credentialMapper.updatePassword(userId, passwordEncoder.encode(rawPassword), "bcrypt");
+        if (affected == 0) {
+            throw ErrorCode.NOT_FOUND.ex("User credential not found");
+        }
+        refreshTokenMapper.revokeAllByUserId(userId, LocalDateTime.now());
+        loginAttempts.keySet().removeIf(key -> key.endsWith("|" + normalizeLogin(login)));
+        return userId;
+    }
+
     public void clearLoginAttempts(String login, String ip) {
         loginAttempts.remove(loginAttemptKey(login, ip));
     }
@@ -279,9 +302,13 @@ public class AuthService {
     }
 
     private String loginAttemptKey(String login, String ip) {
-        String normalizedLogin = login == null ? "" : login.trim().toLowerCase(Locale.ROOT);
+        String normalizedLogin = normalizeLogin(login);
         String normalizedIp = ip == null || ip.isBlank() ? "unknown" : ip.trim();
         return normalizedIp + "|" + normalizedLogin;
+    }
+
+    private String normalizeLogin(String login) {
+        return login == null ? "" : login.trim().toLowerCase(Locale.ROOT);
     }
 
     private record LoginAttemptWindow(int failedAttempts, long windowStartedAtMillis) {

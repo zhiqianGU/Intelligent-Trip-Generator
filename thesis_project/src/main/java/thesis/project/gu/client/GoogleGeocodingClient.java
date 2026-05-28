@@ -54,7 +54,7 @@ public class GoogleGeocodingClient {
         }
         String key = firstNonBlank(geocodingProperties.apiKey(), placesProperties.apiKey());
         if (key == null) {
-            log.warn("Google Geocoding skipped because apiKey is blank");
+            log.debug("Google Geocoding skipped because apiKey is blank");
             return null;
         }
 
@@ -76,22 +76,22 @@ public class GoogleGeocodingClient {
         try {
             ResponseEntity<String> response = restTemplate.exchange(uri, HttpMethod.GET, new HttpEntity<>(headers), String.class);
             if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
-                log.warn("Google Geocoding failed status={} query={}", response.getStatusCodeValue(), text);
+                log.debug("Google Geocoding failed status={} query={}", response.getStatusCodeValue(), text);
                 throw new IllegalStateException("Google Geocoding HTTP " + response.getStatusCodeValue());
             }
             return toGeoResponse(objectMapper.readTree(response.getBody()), text, city, source);
         } catch (HttpStatusCodeException e) {
-            log.warn("Google Geocoding failed status={} query={} bodySnippet={}",
+            log.debug("Google Geocoding failed status={} query={} bodySnippet={}",
                     e.getStatusCode().value(), text, snippet(e.getResponseBodyAsString()));
             throw e;
         } catch (RestClientException | IOException e) {
-            log.warn("Google Geocoding failed query={} reason={}", text, e.getMessage());
+            log.debug("Google Geocoding failed query={} reason={}", text, e.getMessage());
             throw new IllegalStateException("Google Geocoding failed", e);
         }
     }
 
     private GeoResponse geocodeFallback(String query, String city, String source, Throwable cause) {
-        log.warn("Google Geocoding degraded query={} city={} source={} reason={}", query, city, source, cause.toString());
+        log.debug("Google Geocoding degraded query={} city={} source={} reason={}", query, city, source, cause.toString());
         return null;
     }
 

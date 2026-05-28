@@ -2,6 +2,8 @@ server:
   port: 8080
 
 app:
+  auth:
+    reset-password-token: ${RESET_PASSWORD_TOKEN:dev-reset-password-token}
   cache:
     clear-on-shutdown: false
     redis-prefix: "nav:"
@@ -54,9 +56,9 @@ resilience4j:
   ratelimiter:
     instances:
       llmProvider:
-        limit-for-period: 4
+        limit-for-period: 20
         limit-refresh-period: 1m
-        timeout-duration: 2s
+        timeout-duration: 10s
       googlePlaces:
         limit-for-period: 30
         limit-refresh-period: 1m
@@ -84,15 +86,15 @@ amap:
 
 quenmoel:
   provider: qwen
-  model: qwen-max
+  model: qwen-plus-2025-09-11
   gemini-key: ${GEMINI_API_KEY:}
   gemini-base-url: https://generativelanguage.googleapis.com/v1beta
-  key: sk-8eff18523cec450e9c472123e1a6aecd
-  base-url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+  key: sk-bf52a4e6b04f49e88f3fadc93efd5b17
+  base-url: https://dashscope-intl.aliyuncs.com/api/v1
   copy-polish-enabled: true
   copy-polish-provider: qwen
-  copy-polish-model: qwen-plus
-  copy-polish-timeout-seconds: 30
+  copy-polish-model: qwen-plus-2025-09-11
+  copy-polish-timeout-seconds: 100
 
 
 spring:
@@ -129,6 +131,5 @@ logging:
     org.mybatis: DEBUG
     org.springframework.boot.autoconfigure: DEBUG
     thesis.project.gu: debug
-
 
 

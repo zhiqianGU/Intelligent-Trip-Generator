@@ -3,6 +3,7 @@ package thesis.project.gu.Controller;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -18,6 +20,7 @@ import thesis.project.gu.exception.ErrorCode;
 import thesis.project.gu.exception.NavigatorException;
 import thesis.project.gu.req.LoginReq;
 import thesis.project.gu.req.RegisterReq;
+import thesis.project.gu.req.ResetPasswordReq;
 import thesis.project.gu.service.AuthService;
 import thesis.project.gu.service.CaptchaChallengeService;
 
@@ -31,10 +34,16 @@ public class AuthController {
 
     private final AuthService authService;
     private final CaptchaChallengeService captchaChallengeService;
+    private final String resetPasswordToken;
 
-    public AuthController(AuthService authService, CaptchaChallengeService captchaChallengeService) {
+    public AuthController(
+            AuthService authService,
+            CaptchaChallengeService captchaChallengeService,
+            @Value("${app.auth.reset-password-token:}") String resetPasswordToken
+    ) {
         this.authService = authService;
         this.captchaChallengeService = captchaChallengeService;
+        this.resetPasswordToken = resetPasswordToken;
     }
 
     record TokenResp(String token, Map<String, Object> user) {}
@@ -123,6 +132,18 @@ public class AuthController {
             authService.logout(refreshToken);
         }
         clearRefreshCookie(response);
+    }
+
+    @PostMapping("/reset-password")
+    public Map<String, Object> resetPassword(
+            @RequestBody @Valid ResetPasswordReq req,
+            @RequestHeader(name = "X-Reset-Password-Token", required = false) String token
+    ) {
+        if (resetPasswordToken == null || resetPasswordToken.isBlank() || !resetPasswordToken.equals(token)) {
+            throw ErrorCode.UNAUTHORIZED.ex("Invalid reset password token");
+        }
+        long userId = authService.resetPassword(req.login(), req.password());
+        return Map.of("userId", userId, "status", "password-reset");
     }
 
     private void addRefreshCookie(HttpServletResponse response, String refreshToken, boolean rememberMe) {

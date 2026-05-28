@@ -1,0 +1,727 @@
+{
+  "city": "Brisbane",
+  "datasetType": "attractions",
+  "description": "Additional curated Brisbane attractions for fast local itinerary generation. Coordinates are approximate and should be batch-verified before production use.",
+  "items": [
+    {
+      "name": "Fish Lane Arts Precinct",
+      "category": "arts_precinct",
+      "area": "South Brisbane",
+      "addressLine": "Fish Lane, South Brisbane",
+      "latitude": -27.4736,
+      "longitude": 153.0173,
+      "stayMinutes": 60,
+      "styleTags": [
+        "art",
+        "laneway",
+        "food",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "afternoon",
+        "evening"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "West End Markets",
+      "category": "market",
+      "area": "West End",
+      "addressLine": "Davies Park, Montague Road, West End",
+      "latitude": -27.4799,
+      "longitude": 153.0007,
+      "stayMinutes": 90,
+      "styleTags": [
+        "market",
+        "food",
+        "local",
+        "shopping"
+      ],
+      "timeSlots": [
+        "morning"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Davies Park",
+      "category": "park",
+      "area": "West End",
+      "addressLine": "Montague Road, West End",
+      "latitude": -27.4797,
+      "longitude": 153.0011,
+      "stayMinutes": 45,
+      "styleTags": [
+        "park",
+        "local",
+        "family",
+        "river_nearby"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 68,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Orleigh Park",
+      "category": "park",
+      "area": "West End",
+      "addressLine": "Hill End Terrace, West End",
+      "latitude": -27.4826,
+      "longitude": 152.9959,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "park",
+        "family",
+        "relaxation"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "QUT Art Museum",
+      "category": "art_gallery",
+      "area": "Brisbane CBD",
+      "addressLine": "2 George Street, Brisbane City",
+      "latitude": -27.4768,
+      "longitude": 153.0281,
+      "stayMinutes": 60,
+      "styleTags": [
+        "art",
+        "culture",
+        "indoor",
+        "university"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 73,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "UQ Art Museum",
+      "category": "art_gallery",
+      "area": "St Lucia",
+      "addressLine": "University of Queensland, St Lucia",
+      "latitude": -27.4975,
+      "longitude": 153.0137,
+      "stayMinutes": 60,
+      "styleTags": [
+        "art",
+        "culture",
+        "university",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 73,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "The University of Queensland Great Court",
+      "category": "heritage_precinct",
+      "area": "St Lucia",
+      "addressLine": "University of Queensland, St Lucia",
+      "latitude": -27.497,
+      "longitude": 153.0132,
+      "stayMinutes": 45,
+      "styleTags": [
+        "architecture",
+        "heritage",
+        "university",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "UQ Lakes",
+      "category": "lake",
+      "area": "St Lucia",
+      "addressLine": "University of Queensland, St Lucia",
+      "latitude": -27.4991,
+      "longitude": 153.0158,
+      "stayMinutes": 45,
+      "styleTags": [
+        "nature",
+        "walking",
+        "relaxation",
+        "university"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Toowong Cemetery",
+      "category": "heritage_site",
+      "area": "Toowong",
+      "addressLine": "Frederick Street, Toowong",
+      "latitude": -27.4745,
+      "longitude": 152.9745,
+      "stayMinutes": 75,
+      "styleTags": [
+        "history",
+        "heritage",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Paddington Antique Centre",
+      "category": "shopping_precinct",
+      "area": "Paddington",
+      "addressLine": "167 Latrobe Terrace, Paddington",
+      "latitude": -27.459,
+      "longitude": 153.0016,
+      "stayMinutes": 60,
+      "styleTags": [
+        "shopping",
+        "heritage",
+        "vintage",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Victoria Park / Barrambin",
+      "category": "park",
+      "area": "Herston",
+      "addressLine": "Gilchrist Avenue, Herston",
+      "latitude": -27.4542,
+      "longitude": 153.0247,
+      "stayMinutes": 75,
+      "styleTags": [
+        "park",
+        "city_view",
+        "family",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 77,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Old Windmill Tower",
+      "category": "heritage_landmark",
+      "area": "Spring Hill",
+      "addressLine": "Wickham Terrace, Spring Hill",
+      "latitude": -27.4645,
+      "longitude": 153.0232,
+      "stayMinutes": 30,
+      "styleTags": [
+        "heritage",
+        "history",
+        "architecture"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Spring Hill Baths",
+      "category": "heritage_site",
+      "area": "Spring Hill",
+      "addressLine": "14 Torrington Street, Spring Hill",
+      "latitude": -27.4615,
+      "longitude": 153.025,
+      "stayMinutes": 45,
+      "styleTags": [
+        "heritage",
+        "swimming",
+        "local_history"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 68,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Miegunyah House Museum",
+      "category": "heritage_house",
+      "area": "Bowen Hills",
+      "addressLine": "35 Jordan Terrace, Bowen Hills",
+      "latitude": -27.4494,
+      "longitude": 153.0372,
+      "stayMinutes": 60,
+      "styleTags": [
+        "history",
+        "heritage",
+        "museum",
+        "indoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 69,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Walkabout Creek Discovery Centre",
+      "category": "nature_centre",
+      "area": "The Gap",
+      "addressLine": "60 Mount Nebo Road, The Gap",
+      "latitude": -27.4453,
+      "longitude": 152.9247,
+      "stayMinutes": 90,
+      "styleTags": [
+        "nature",
+        "education",
+        "family",
+        "wildlife"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Enoggera Reservoir",
+      "category": "lake",
+      "area": "The Gap",
+      "addressLine": "Walkabout Creek, The Gap",
+      "latitude": -27.4445,
+      "longitude": 152.9186,
+      "stayMinutes": 120,
+      "styleTags": [
+        "nature",
+        "water",
+        "walking",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "D'Aguilar National Park - Walkabout Creek Area",
+      "category": "national_park",
+      "area": "The Gap",
+      "addressLine": "Mount Nebo Road, The Gap",
+      "latitude": -27.44,
+      "longitude": 152.91,
+      "stayMinutes": 180,
+      "styleTags": [
+        "nature",
+        "walking",
+        "forest",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Mount Gravatt Outlook Reserve",
+      "category": "lookout",
+      "area": "Mount Gravatt",
+      "addressLine": "Shire Road, Mount Gravatt",
+      "latitude": -27.5465,
+      "longitude": 153.0775,
+      "stayMinutes": 60,
+      "styleTags": [
+        "view",
+        "nature",
+        "walking",
+        "lookout"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Toohey Forest Park",
+      "category": "nature_reserve",
+      "area": "Nathan",
+      "addressLine": "Toohey Forest, Nathan",
+      "latitude": -27.5452,
+      "longitude": 153.0598,
+      "stayMinutes": 90,
+      "styleTags": [
+        "nature",
+        "walking",
+        "forest",
+        "wildlife"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Whites Hill Reserve",
+      "category": "nature_reserve",
+      "area": "Camp Hill",
+      "addressLine": "Boundary Road, Camp Hill",
+      "latitude": -27.5,
+      "longitude": 153.0756,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "walking",
+        "family",
+        "wildlife"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Seven Hills Bushland Reserve",
+      "category": "nature_reserve",
+      "area": "Seven Hills",
+      "addressLine": "Seven Hills, Brisbane",
+      "latitude": -27.4829,
+      "longitude": 153.0748,
+      "stayMinutes": 75,
+      "styleTags": [
+        "nature",
+        "walking",
+        "bushland"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Minnippi Parklands",
+      "category": "park",
+      "area": "Carina",
+      "addressLine": "Stanton Road West, Carina",
+      "latitude": -27.4891,
+      "longitude": 153.1028,
+      "stayMinutes": 75,
+      "styleTags": [
+        "park",
+        "wetland",
+        "family",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Colmslie Beach Reserve",
+      "category": "riverfront_park",
+      "area": "Morningside",
+      "addressLine": "Colmslie Road, Morningside",
+      "latitude": -27.4556,
+      "longitude": 153.0871,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "park",
+        "family",
+        "picnic"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Bulimba Riverside Park",
+      "category": "riverfront_park",
+      "area": "Bulimba",
+      "addressLine": "Quay Street, Bulimba",
+      "latitude": -27.4495,
+      "longitude": 153.0594,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "park",
+        "family",
+        "relaxation"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 69,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Oxford Street Bulimba",
+      "category": "shopping_precinct",
+      "area": "Bulimba",
+      "addressLine": "Oxford Street, Bulimba",
+      "latitude": -27.4492,
+      "longitude": 153.0577,
+      "stayMinutes": 75,
+      "styleTags": [
+        "shopping",
+        "food",
+        "local",
+        "city_walk"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "New Farm Riverwalk",
+      "category": "river_walk",
+      "area": "New Farm",
+      "addressLine": "Brisbane River, New Farm",
+      "latitude": -27.4649,
+      "longitude": 153.0463,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "walking",
+        "city_view",
+        "outdoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Teneriffe Riverwalk",
+      "category": "river_walk",
+      "area": "Teneriffe",
+      "addressLine": "Teneriffe Boardwalk, Teneriffe",
+      "latitude": -27.4555,
+      "longitude": 153.0505,
+      "stayMinutes": 60,
+      "styleTags": [
+        "riverfront",
+        "walking",
+        "heritage",
+        "outdoor"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Wynnum Mangrove Boardwalk",
+      "category": "boardwalk",
+      "area": "Wynnum",
+      "addressLine": "Wynnum North Road, Wynnum",
+      "latitude": -27.4336,
+      "longitude": 153.1744,
+      "stayMinutes": 60,
+      "styleTags": [
+        "coastal",
+        "nature",
+        "walking",
+        "family"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Wynnum Wading Pool",
+      "category": "coastal_pool",
+      "area": "Wynnum",
+      "addressLine": "Wynnum Esplanade, Wynnum",
+      "latitude": -27.442,
+      "longitude": 153.174,
+      "stayMinutes": 75,
+      "styleTags": [
+        "coastal",
+        "family",
+        "water",
+        "relaxation"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Manly Harbour Village",
+      "category": "harbour_precinct",
+      "area": "Manly",
+      "addressLine": "Cambridge Parade, Manly",
+      "latitude": -27.454,
+      "longitude": 153.1865,
+      "stayMinutes": 90,
+      "styleTags": [
+        "coastal",
+        "harbour",
+        "food",
+        "walking"
+      ],
+      "timeSlots": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "free",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    }
+  ]
+}

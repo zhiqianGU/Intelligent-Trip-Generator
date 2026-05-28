@@ -16,6 +16,8 @@
   let deleteActionContext = null;
   let generateProgressTimer = null;
   let routeSuggestionRunId = 0;
+  let copyPolishRunId = 0;
+  let copyPolishInFlight = false;
 
   // =========================
   // api
@@ -28,7 +30,8 @@
     logout: '/auth/logout',
     raw: '/api/v1/plans/raw',
     draft: '/api/v1/plans/draft',
-    routeSuggestions: '/api/v1/plans/route-suggestions',
+    copyPolish: '/api/v1/plans/copy-polish',
+    routeSuggestionDay: '/api/v1/plans/route-suggestions/day',
     weather: '/api/v1/plans/weather',
     myPlans: '/api/v1/plans/me',
     myFavorites: '/api/v1/plans/me/favorites',
@@ -184,7 +187,8 @@
   let currentFavorite = localStorage.getItem(PLAN_FAVORITE_KEY) === 'true';
   let lastRequestedPace = null;
   let currentDayPage = 1;
-  let latestRouteSuggestions = null;
+  let routeSuggestionByDay = new Map();
+  let routeSuggestionDraftKey = '';
   let latestWeatherForecast = null;
 
   if (els.departureDate && !els.departureDate.value) {
@@ -578,13 +582,15 @@
       });
     }
     if (els.pace) els.pace.value = 'normal';
-    if (els.mainModel) els.mainModel.value = 'qwen-max';
+    if (els.mainModel) els.mainModel.value = 'local-fast';
     if (els.selfDrive) els.selfDrive.checked = false;
     localStorage.removeItem(PLAN_DRIVE_KEY);
   }
 
   function clearRenderedPlanOnly() {
     routeSuggestionRunId++;
+    routeSuggestionByDay = new Map();
+    routeSuggestionDraftKey = '';
     currentPlanId = null;
     currentDraft = null;
     currentPreview = '';
@@ -739,7 +745,7 @@
     const style = getStyleValues();
     const rawPace = (els.pace?.value || 'normal').trim() || 'normal';
     const pace = rawPace === 'fast' ? 'rush' : rawPace;
-    const mainModel = (els.mainModel?.value || 'qwen-max').trim() || 'qwen-max';
+    const mainModel = (els.mainModel?.value || 'qwen-plus-2025-09-11').trim() || 'qwen-plus-2025-09-11';
 
     if (!city) throw new Error('Please enter a city');
     if (!days || days < 1) throw new Error('Please enter a valid number of days');
@@ -762,8 +768,12 @@
   function formatMainModelLabel(model) {
     const normalized = safeText(model).trim().toLowerCase();
     switch (normalized) {
+      case 'local-fast':
+        return 'Local Fast';
       case 'qwen-max':
         return 'Qwen Max';
+      case 'qwen-plus-2025-09-11':
+        return 'Qwen Plus 2025-09-11';
       case 'qwen-plus':
         return 'Qwen Plus';
       case 'gemini-2.5-flash':
@@ -785,16 +795,53 @@
     return backendDraft;
   }
 
-  function renderDraft(draft, preview, weatherPromise = null) {
+  function routeSuggestionCacheKeyForDraft(draft) {
+    if (!draft || typeof draft !== 'object') return '';
+    const days = Array.isArray(draft.daysPlan) ? draft.daysPlan : [];
+    const dayKeys = days.map(day => {
+      const stops = Array.isArray(day.stops) ? day.stops : [];
+      return [
+        day.dayIndex || '',
+        day.hotel?.name || '',
+        day.hotel?.latitude ?? '',
+        day.hotel?.longitude ?? '',
+        stops.map(stop => [
+          stop.name || '',
+          stop.latitude ?? '',
+          stop.longitude ?? '',
+          stop.startTime || '',
+          stop.endTime || ''
+        ].join('@')).join('|')
+      ].join('#');
+    }).join('||');
+    return [
+      draft.city || '',
+      draft.days || '',
+      draft.pace || '',
+      draft.copyPolishStatus || '',
+      dayKeys
+    ].join('::');
+  }
+
+  function syncRouteSuggestionCacheForDraft(draft) {
+    const nextKey = routeSuggestionCacheKeyForDraft(draft);
+    if (nextKey !== routeSuggestionDraftKey) {
+      routeSuggestionByDay = new Map();
+      routeSuggestionDraftKey = nextKey;
+    }
+  }
+
+  function renderDraft(draft, preview, weatherPromise = null, options = {}) {
     if (!draft) {
       clearRenderedPlanOnly();
       return;
     }
+    syncRouteSuggestionCacheForDraft(draft);
+    const skipAsyncEnhancers = !!options.skipAsyncEnhancers;
     const dayCount = Array.isArray(draft.daysPlan) ? draft.daysPlan.length : 0;
     if (!currentDayPage || currentDayPage > dayCount) {
       currentDayPage = 1;
     }
-    latestRouteSuggestions = null;
     latestWeatherForecast = null;
 
     setVisible(els.resultEmpty, false);
@@ -819,8 +866,13 @@
       const generationTimeText = draft._generationTimeMs
           ? `Generated in ${formatDurationMs(draft._generationTimeMs)}`
           : '';
+      const copyPolishText = draft.copyPolishStatus === 'deferred'
+          ? 'Polishing copy...'
+          : draft.copyPolishStatus === 'completed'
+              ? 'Copy polished'
+              : '';
 
-      const tags = [budgetText, `${adults} Adults`, `${kids} Children`, paceText, fallbackText, modelText, generationTimeText]
+      const tags = [budgetText, `${adults} Adults`, `${kids} Children`, paceText, fallbackText, modelText, generationTimeText, copyPolishText]
           .filter(Boolean)
           .map(t => `<span class="chip">${escapeHtml(t)}</span>`)
           .join('');
@@ -997,8 +1049,11 @@
     syncFavoriteButtonState();
     localizeDom(els.resultContent || document.body);
     showWeatherLoading();
-    requestRouteSuggestions(draft);
-    (weatherPromise || requestWeatherForecast(buildWeatherPayloadFromDraft(draft))).then(renderWeatherForecast);
+    if (!skipAsyncEnhancers) {
+      requestRouteSuggestionForDay(draft, currentDayPage);
+      requestCopyPolish(draft);
+      (weatherPromise || requestWeatherForecast(buildWeatherPayloadFromDraft(draft))).then(renderWeatherForecast);
+    }
     syncDaySideArrowPosition();
   }
 
@@ -1031,9 +1086,6 @@
     if (!currentDraft || !Number.isFinite(nextDay) || nextDay < 1) return;
     currentDayPage = nextDay;
     renderDraft(currentDraft, currentPreview, Promise.resolve(latestWeatherForecast));
-    if (latestRouteSuggestions) {
-      renderRouteSuggestions(latestRouteSuggestions);
-    }
     syncDaySideArrowPosition();
   }
 
@@ -1083,28 +1135,100 @@
     `;
   }
 
-  async function requestRouteSuggestions(draft) {
-    if (!draft || !Array.isArray(draft.daysPlan) || !els.resultDays) return;
+  async function requestRouteSuggestionForDay(draft, dayIndex, options = {}) {
+    if (!draft || !Array.isArray(draft.daysPlan) || !els.resultDays) return null;
+    const normalizedDayIndex = Number(dayIndex || currentDayPage || 1);
+    if (!Number.isFinite(normalizedDayIndex) || normalizedDayIndex < 1) return null;
+
+    syncRouteSuggestionCacheForDraft(draft);
+    const cached = routeSuggestionByDay.get(normalizedDayIndex);
+    if (cached) {
+      renderRouteSuggestionDay(cached);
+      return cached;
+    }
+
     const runId = ++routeSuggestionRunId;
     try {
-      const resp = await fetch(API.routeSuggestions, {
+      const resp = await fetch(API.routeSuggestionDay, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           draft: stripFrontendDraftMetadata(draft),
+          dayIndex: normalizedDayIndex,
           budget: Number(els.budget?.value || draft.budget || 0) || null,
           departureDate: (els.departureDate?.value || draft.departureDate || '').trim() || null
         })
       });
       const data = await safeJson(resp);
-      if (runId !== routeSuggestionRunId) return;
+      if (runId !== routeSuggestionRunId && !options.prefetch) return null;
       if (!resp.ok) throw new Error(data?.message || `Route suggestions failed (${resp.status})`);
-      latestRouteSuggestions = data;
-      renderRouteSuggestions(data);
+      if (!data) return null;
+
+      routeSuggestionByDay.set(Number(data.dayIndex || normalizedDayIndex), data);
+      if (!options.prefetch && Number(currentDayPage) === Number(data.dayIndex || normalizedDayIndex)) {
+        renderRouteSuggestionDay(data);
+        prefetchNextRouteSuggestionDay(draft, normalizedDayIndex);
+      }
+      return data;
     } catch (e) {
-      if (runId !== routeSuggestionRunId) return;
+      if (runId !== routeSuggestionRunId && !options.prefetch) return null;
       console.warn(e);
-      markRouteSuggestionsUnavailable();
+      if (!options.prefetch && Number(currentDayPage) === normalizedDayIndex) {
+        markRouteSuggestionDayUnavailable(normalizedDayIndex);
+      }
+      return null;
+    }
+  }
+
+  function prefetchNextRouteSuggestionDay(draft, dayIndex) {
+    if (!draft || !Array.isArray(draft.daysPlan)) return;
+    const currentIndex = draft.daysPlan.findIndex(day => Number(day.dayIndex || 0) === Number(dayIndex));
+    const nextDay = currentIndex >= 0 ? draft.daysPlan[currentIndex + 1] : null;
+    const nextDayIndex = Number(nextDay?.dayIndex || 0);
+    if (!Number.isFinite(nextDayIndex) || nextDayIndex < 1 || routeSuggestionByDay.has(nextDayIndex)) return;
+    requestRouteSuggestionForDay(draft, nextDayIndex, { prefetch: true });
+  }
+
+  async function requestCopyPolish(draft) {
+    if (!draft || draft.copyPolishStatus !== 'deferred' || copyPolishInFlight) return;
+    const runId = ++copyPolishRunId;
+    copyPolishInFlight = true;
+    try {
+      const reqOptions = {
+        method: 'POST',
+        body: JSON.stringify({
+          planId: currentPlanId || null,
+          draft: stripFrontendDraftMetadata(draft)
+        })
+      };
+      const resp = isLoggedIn()
+          ? await authFetch(API.copyPolish, reqOptions)
+          : await fetch(API.copyPolish, {
+            ...reqOptions,
+            headers: { 'Content-Type': 'application/json' }
+          });
+      const data = await safeJson(resp);
+      if (runId !== copyPolishRunId) return;
+      if (!resp.ok) throw new Error(data?.message || `Copy polish failed (${resp.status})`);
+      if (!data) return;
+
+      currentDraft = mergeFrontendDraftMetadata(currentDraft, data);
+      writeJson(PLAN_CACHE_KEY, currentDraft);
+      renderDraft(currentDraft, currentPreview, Promise.resolve(latestWeatherForecast), { skipAsyncEnhancers: true });
+      const cachedRouteDay = routeSuggestionByDay.get(Number(currentDayPage));
+      if (cachedRouteDay) {
+        renderRouteSuggestionDay(cachedRouteDay);
+      }
+      if (latestWeatherForecast) {
+        renderWeatherForecast(latestWeatherForecast);
+      }
+    } catch (e) {
+      if (runId !== copyPolishRunId) return;
+      console.warn(e);
+    } finally {
+      if (runId === copyPolishRunId) {
+        copyPolishInFlight = false;
+      }
     }
   }
 
@@ -1157,19 +1281,21 @@
       document.querySelectorAll('.weather-card[data-weather-day]').forEach(slot => {
         slot.className = 'weather-card weather-card-inline is-muted';
         slot.innerHTML = `
-          <div class="weather-icon">--</div>
+          <div class="weather-icon">Sky</div>
           <div>
-            <strong>Weather unavailable</strong>
-            <span>Normal route rules still apply.</span>
+            <strong>No weather data</strong>
+            <span>Default sunny · Rain 0%</span>
           </div>
         `;
       });
       return;
     }
 
+    const renderedDayIndexes = new Set();
     for (const day of days) {
       const slot = document.querySelector(`[data-weather-day="${cssEscape(String(day.dayIndex ?? ''))}"]`);
       if (!slot) continue;
+      renderedDayIndexes.add(String(day.dayIndex ?? ''));
       const rainy = !!day.rainy;
       const tempText = formatTemperatureRange(day);
       slot.className = `weather-card weather-card-inline${rainy ? ' is-rainy' : ''}`;
@@ -1181,6 +1307,17 @@
         </div>
       `;
     }
+    document.querySelectorAll('.weather-card[data-weather-day]').forEach(slot => {
+      if (renderedDayIndexes.has(String(slot.dataset.weatherDay ?? ''))) return;
+      slot.className = 'weather-card weather-card-inline';
+      slot.innerHTML = `
+        <div class="weather-icon">Sky</div>
+        <div>
+          <strong>No weather data</strong>
+          <span>Default sunny · Rain 0%</span>
+        </div>
+      `;
+    });
   }
 
   function formatTemperatureRange(day) {
@@ -1192,21 +1329,35 @@
     return '';
   }
 
-  function renderRouteSuggestions(data) {
-    const days = Array.isArray(data?.days) ? data.days : [];
-    for (const day of days) {
-      const segments = Array.isArray(day.segments) ? day.segments : [];
-      for (const segment of segments) {
-        const slot = document.querySelector(`[data-route-day="${cssEscape(String(day.dayIndex ?? ''))}"][data-route-index="${cssEscape(String(segment.segmentIndex ?? ''))}"]`);
-        if (!slot) continue;
-        if (segment.hidden) {
-          slot.remove();
-          continue;
-        }
-        slot.classList.remove('is-loading');
-        slot.innerHTML = routeSuggestionHtml(segment);
+  function renderRouteSuggestionDay(day) {
+    if (!day) return;
+    const segments = Array.isArray(day.segments) ? day.segments : [];
+    for (const segment of segments) {
+      const slot = document.querySelector(`[data-route-day="${cssEscape(String(day.dayIndex ?? ''))}"][data-route-index="${cssEscape(String(segment.segmentIndex ?? ''))}"]`);
+      if (!slot) continue;
+      if (segment.hidden) {
+        slot.remove();
+        continue;
       }
+      slot.classList.remove('is-loading');
+      slot.innerHTML = routeSuggestionHtml(segment);
     }
+    localizeDom(els.resultContent || document.body);
+  }
+
+  function markRouteSuggestionDayUnavailable(dayIndex) {
+    const slots = document.querySelectorAll(`[data-route-day="${cssEscape(String(dayIndex ?? ''))}"]`);
+    slots.forEach(slot => {
+      slot.classList.remove('is-loading');
+      slot.innerHTML = `
+        <div class="route-line"></div>
+        <div class="route-card route-card-muted">
+          <span class="route-pill">Route</span>
+          <strong>Route suggestion unavailable</strong>
+          <span class="muted">Try again later or check the map manually.</span>
+        </div>
+      `;
+    });
     localizeDom(els.resultContent || document.body);
   }
 
@@ -1236,20 +1387,6 @@
         ${segment.hint ? `<span class="route-hint">${escapeHtml(segment.hint)}</span>` : ''}
       </div>
     `;
-  }
-
-  function markRouteSuggestionsUnavailable() {
-    document.querySelectorAll('.route-suggestion.is-loading').forEach(slot => {
-      slot.classList.remove('is-loading');
-      slot.innerHTML = `
-        <div class="route-line"></div>
-        <div class="route-card route-card-muted">
-          <span class="route-pill">Route</span>
-          <strong>Route suggestions unavailable</strong>
-          <span class="muted">${escapeHtml(slot.dataset.routeHint || 'The plan is ready; open the map view if you want to inspect routes manually.')}</span>
-        </div>
-      `;
-    });
   }
 
   function labelMode(mode) {
@@ -1293,6 +1430,18 @@
     localStorage.setItem(PLAN_DRIVE_KEY, selfDriveChecked ? 'true' : 'false');
   }
 
+  function mergeFrontendDraftMetadata(baseDraft, nextDraft) {
+    if (!nextDraft || typeof nextDraft !== 'object') return baseDraft;
+    if (!baseDraft || typeof baseDraft !== 'object') return nextDraft;
+    return {
+      ...nextDraft,
+      _generationTimeMs: baseDraft._generationTimeMs,
+      _requestedPace: baseDraft._requestedPace,
+      mainModel: baseDraft.mainModel,
+      _mainModel: baseDraft._mainModel
+    };
+  }
+
   function restoreLatestPlan() {
     if (currentDraft) {
       renderDraft(currentDraft, currentPreview);
@@ -1322,6 +1471,8 @@
     }
 
     clearRenderedPlanOnly();
+    copyPolishInFlight = false;
+    copyPolishRunId++;
 
     const selfDriveChecked = !!els.selfDrive?.checked;
     const loggedIn = isLoggedIn();
@@ -1339,14 +1490,14 @@
       lastRequestedPace = payload.pace;
       const reqOptions = {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Defer-Copy-Polish': 'true' },
         body: JSON.stringify(payload)
       };
 
       const resp = loggedIn
           ? await authFetch(url, reqOptions)
           : await fetch(url, {
-            ...reqOptions,
-            headers: { 'Content-Type': 'application/json' }
+            ...reqOptions
           });
 
       const data = await safeJson(resp);
@@ -1380,6 +1531,11 @@
         normalized.draft._requestedPace = payload.pace;
         normalized.draft.mainModel = payload.mainModel;
         normalized.draft._mainModel = payload.mainModel;
+        const actualDays = Array.isArray(normalized.draft.daysPlan) ? normalized.draft.daysPlan.length : 0;
+        const declaredDays = Number(normalized.draft.days || 0);
+        if (actualDays !== payload.days || declaredDays !== payload.days) {
+          throw new Error(`Generated plan day count mismatch: requested ${payload.days}, got ${actualDays || declaredDays || 0}. Please retry.`);
+        }
       }
 
       cacheLatestPlan(normalized, selfDriveChecked);

@@ -1,0 +1,2156 @@
+{
+  "city": "Brisbane",
+  "datasetType": "restaurants",
+  "description": "Curated Brisbane restaurant and food precinct dataset for fast local itinerary generation. Verify live opening hours before production use.",
+  "items": [
+    {
+      "name": "Felons Brewing Co.",
+      "type": "restaurant",
+      "category": "brewery_restaurant",
+      "city": "Brisbane",
+      "area": "Howard Smith Wharves",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.4633,
+      "longitude": 153.035,
+      "stayMinutes": 75,
+      "styleTags": [
+        "riverside",
+        "casual",
+        "brewery"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 94,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Felons Barrel Hall",
+      "type": "restaurant",
+      "category": "brewery_restaurant",
+      "city": "Brisbane",
+      "area": "Howard Smith Wharves",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.463,
+      "longitude": 153.0352,
+      "stayMinutes": 75,
+      "styleTags": [
+        "riverside",
+        "brewery",
+        "casual"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 88,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Mr Percival's",
+      "type": "restaurant",
+      "category": "bar_restaurant",
+      "city": "Brisbane",
+      "area": "Howard Smith Wharves",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.4635,
+      "longitude": 153.0355,
+      "stayMinutes": 75,
+      "styleTags": [
+        "riverside",
+        "view",
+        "bar"
+      ],
+      "timeSlots": [
+        "dinner"
+      ],
+      "priority": 86,
+      "familyFriendly": false,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Stanley Restaurant",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Howard Smith Wharves",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.4636,
+      "longitude": 153.0354,
+      "stayMinutes": 90,
+      "styleTags": [
+        "riverside",
+        "upscale",
+        "asian"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 90,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "cantonese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Greca Restaurant",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Howard Smith Wharves",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.4638,
+      "longitude": 153.0348,
+      "stayMinutes": 90,
+      "styleTags": [
+        "riverside",
+        "group_friendly",
+        "mediterranean"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 89,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "greek",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Yoko Dining",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Howard Smith Wharves",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.4637,
+      "longitude": 153.0349,
+      "stayMinutes": 90,
+      "styleTags": [
+        "riverside",
+        "asian",
+        "lively"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 87,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "japanese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Fellini's Trattoria",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Howard Smith Wharves",
+      "addressLine": "5 Boundary Street, Brisbane City",
+      "latitude": -27.4632,
+      "longitude": 153.0351,
+      "stayMinutes": 75,
+      "styleTags": [
+        "italian",
+        "riverside",
+        "casual"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 83,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Julius Pizzeria",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "South Brisbane",
+      "addressLine": "77 Grey Street, South Brisbane",
+      "latitude": -27.4727,
+      "longitude": 153.0161,
+      "stayMinutes": 75,
+      "styleTags": [
+        "italian",
+        "casual",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 88,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Chu The Phat",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "South Brisbane",
+      "addressLine": "111 Melbourne Street, South Brisbane",
+      "latitude": -27.4745,
+      "longitude": 153.015,
+      "stayMinutes": 75,
+      "styleTags": [
+        "asian",
+        "lively",
+        "group_friendly"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "asian fusion",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Gauge",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "South Brisbane",
+      "addressLine": "77 Grey Street, South Brisbane",
+      "latitude": -27.4721,
+      "longitude": 153.016,
+      "stayMinutes": 60,
+      "styleTags": [
+        "modern",
+        "brunch",
+        "indoor"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "River Quay Fish",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Sidon Street, South Bank",
+      "latitude": -27.481,
+      "longitude": 153.0247,
+      "stayMinutes": 75,
+      "styleTags": [
+        "riverside",
+        "seafood",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "seafood",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Popolo Italian Kitchen and Bar",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Sidon Street, South Bank",
+      "latitude": -27.4808,
+      "longitude": 153.0245,
+      "stayMinutes": 90,
+      "styleTags": [
+        "riverside",
+        "italian",
+        "group_friendly"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 83,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "OTTO Ristorante Brisbane",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "Sidon Street, South Bank",
+      "latitude": -27.4806,
+      "longitude": 153.0242,
+      "stayMinutes": 90,
+      "styleTags": [
+        "riverside",
+        "upscale",
+        "italian"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 86,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "South Bank Beer Garden",
+      "type": "restaurant",
+      "category": "bar_restaurant",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "30ba Stanley Street Plaza, South Brisbane",
+      "latitude": -27.4782,
+      "longitude": 153.0222,
+      "stayMinutes": 75,
+      "styleTags": [
+        "casual",
+        "pub",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "pub food",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "The Charming Squire",
+      "type": "restaurant",
+      "category": "brewery_restaurant",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "133 Grey Street, South Brisbane",
+      "latitude": -27.4766,
+      "longitude": 153.0201,
+      "stayMinutes": 75,
+      "styleTags": [
+        "brewery",
+        "casual",
+        "group_friendly"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Brooklyn Depot South Bank",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "172 Grey Street, South Brisbane",
+      "latitude": -27.4772,
+      "longitude": 153.0212,
+      "stayMinutes": 75,
+      "styleTags": [
+        "casual",
+        "family",
+        "burgers"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "american",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Pancake Manor",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "18 Charlotte Street, Brisbane City",
+      "latitude": -27.471,
+      "longitude": 153.0272,
+      "stayMinutes": 60,
+      "styleTags": [
+        "casual",
+        "family",
+        "heritage"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "pancakes",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Donna Chang",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "171 George Street, Brisbane City",
+      "latitude": -27.4719,
+      "longitude": 153.0253,
+      "stayMinutes": 90,
+      "styleTags": [
+        "upscale",
+        "asian",
+        "heritage"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 86,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "chinese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Walter's Steakhouse",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "219 Alice Street, Brisbane City",
+      "latitude": -27.4743,
+      "longitude": 153.0295,
+      "stayMinutes": 90,
+      "styleTags": [
+        "upscale",
+        "steakhouse",
+        "classic"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "steakhouse",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Moo Moo The Wine Bar + Grill",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "39 Edward Street, Brisbane City",
+      "latitude": -27.4725,
+      "longitude": 153.0294,
+      "stayMinutes": 90,
+      "styleTags": [
+        "steakhouse",
+        "upscale",
+        "city"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "steakhouse",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Brew Cafe & Wine Bar",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "Lower Burnett Lane, Brisbane City",
+      "latitude": -27.4695,
+      "longitude": 153.0248,
+      "stayMinutes": 60,
+      "styleTags": [
+        "cafe",
+        "laneway",
+        "casual"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 75,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Red Hook",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "88 Creek Street, Brisbane City",
+      "latitude": -27.4666,
+      "longitude": 153.0274,
+      "stayMinutes": 60,
+      "styleTags": [
+        "casual",
+        "burgers",
+        "laneway"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "american",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Jimmy's on the Mall",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "Queen Street Mall, Brisbane City",
+      "latitude": -27.4698,
+      "longitude": 153.0245,
+      "stayMinutes": 75,
+      "styleTags": [
+        "casual",
+        "central",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Madame Wu",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "71 Eagle Street, Brisbane City",
+      "latitude": -27.4668,
+      "longitude": 153.0304,
+      "stayMinutes": 90,
+      "styleTags": [
+        "riverside",
+        "asian",
+        "upscale"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 86,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "asian fusion",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Blackbird Bar & Grill",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "123 Eagle Street, Brisbane City",
+      "latitude": -27.4661,
+      "longitude": 153.0301,
+      "stayMinutes": 90,
+      "styleTags": [
+        "riverside",
+        "steakhouse",
+        "upscale"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "steakhouse",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Riverbar & Kitchen",
+      "type": "restaurant",
+      "category": "bar_restaurant",
+      "city": "Brisbane",
+      "area": "Brisbane CBD",
+      "addressLine": "71 Eagle Street, Brisbane City",
+      "latitude": -27.4674,
+      "longitude": 153.0307,
+      "stayMinutes": 75,
+      "styleTags": [
+        "riverside",
+        "casual",
+        "view"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Bacchus",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "South Bank",
+      "addressLine": "9 Glenelg Street, South Brisbane",
+      "latitude": -27.4765,
+      "longitude": 153.0204,
+      "stayMinutes": 90,
+      "styleTags": [
+        "upscale",
+        "hotel_dining",
+        "modern"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 82,
+      "familyFriendly": false,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Happy Boy",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "East Street, Fortitude Valley",
+      "latitude": -27.4557,
+      "longitude": 153.0347,
+      "stayMinutes": 75,
+      "styleTags": [
+        "asian",
+        "casual",
+        "lively"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "chinese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Hellenika Brisbane",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "James Street, Fortitude Valley",
+      "latitude": -27.4562,
+      "longitude": 153.0392,
+      "stayMinutes": 90,
+      "styleTags": [
+        "greek",
+        "upscale",
+        "poolside"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 86,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "greek",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "sAme sAme",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "Ada Lane, Fortitude Valley",
+      "latitude": -27.4564,
+      "longitude": 153.039,
+      "stayMinutes": 75,
+      "styleTags": [
+        "thai",
+        "asian",
+        "lively"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "thai",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Gerard's Bistro",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "14/15 James Street, Fortitude Valley",
+      "latitude": -27.4566,
+      "longitude": 153.0397,
+      "stayMinutes": 90,
+      "styleTags": [
+        "upscale",
+        "middle_eastern",
+        "modern"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "middle eastern",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Biànca",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "Ada Lane, Fortitude Valley",
+      "latitude": -27.4563,
+      "longitude": 153.0391,
+      "stayMinutes": 90,
+      "styleTags": [
+        "italian",
+        "upscale",
+        "modern"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Agnes Restaurant",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Fortitude Valley",
+      "addressLine": "22 Agnes Street, Fortitude Valley",
+      "latitude": -27.4529,
+      "longitude": 153.039,
+      "stayMinutes": 90,
+      "styleTags": [
+        "upscale",
+        "modern",
+        "fire_cooking"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 88,
+      "familyFriendly": false,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Mary Mae's",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "New Farm",
+      "addressLine": "119 Lamington Street, New Farm",
+      "latitude": -27.4677,
+      "longitude": 153.0536,
+      "stayMinutes": 75,
+      "styleTags": [
+        "riverside",
+        "casual",
+        "brunch"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Bar Alto",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "New Farm",
+      "addressLine": "119 Lamington Street, New Farm",
+      "latitude": -27.4676,
+      "longitude": 153.0539,
+      "stayMinutes": 75,
+      "styleTags": [
+        "italian",
+        "culture_precinct",
+        "riverside"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Beccofino",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Teneriffe",
+      "addressLine": "10 Vernon Terrace, Teneriffe",
+      "latitude": -27.4552,
+      "longitude": 153.0484,
+      "stayMinutes": 75,
+      "styleTags": [
+        "italian",
+        "casual",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Mizu Japanese Restaurant",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Teneriffe",
+      "addressLine": "2 Macquarie Street, Teneriffe",
+      "latitude": -27.456,
+      "longitude": 153.0486,
+      "stayMinutes": 75,
+      "styleTags": [
+        "japanese",
+        "casual",
+        "riverside_nearby"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 77,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "japanese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Eat Street Northshore",
+      "type": "restaurant",
+      "category": "food_precinct",
+      "city": "Brisbane",
+      "area": "Northshore Hamilton",
+      "addressLine": "221D MacArthur Avenue, Hamilton",
+      "latitude": -27.4418,
+      "longitude": 153.0781,
+      "stayMinutes": 120,
+      "styleTags": [
+        "food_market",
+        "family",
+        "evening"
+      ],
+      "timeSlots": [
+        "dinner"
+      ],
+      "priority": 94,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "dinner"
+      ],
+      "cuisine": "multi-cuisine",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Summit Cafe",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "1012 Sir Samuel Griffith Drive, Mount Coot-tha",
+      "latitude": -27.4841,
+      "longitude": 152.9585,
+      "stayMinutes": 60,
+      "styleTags": [
+        "view",
+        "cafe",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "The Norman Hotel",
+      "type": "restaurant",
+      "category": "steakhouse",
+      "city": "Brisbane",
+      "area": "Woolloongabba",
+      "addressLine": "102 Ipswich Road, Woolloongabba",
+      "latitude": -27.4931,
+      "longitude": 153.0344,
+      "stayMinutes": 90,
+      "styleTags": [
+        "steakhouse",
+        "casual",
+        "group_friendly"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "steakhouse",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "The Summit Restaurant",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "1012 Sir Samuel Griffith Drive, Mount Coot-tha",
+      "latitude": -27.4841,
+      "longitude": 152.9585,
+      "stayMinutes": 90,
+      "styleTags": [
+        "view",
+        "upscale",
+        "lookout",
+        "modern_australian"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 92,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "The Summit Cafe",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "1012 Sir Samuel Griffith Drive, Mount Coot-tha",
+      "latitude": -27.4841,
+      "longitude": 152.9586,
+      "stayMinutes": 60,
+      "styleTags": [
+        "view",
+        "cafe",
+        "family",
+        "lookout"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "The Gardens Club",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "Brisbane Botanic Gardens, 152 Mount Coot-tha Road, Toowong",
+      "latitude": -27.4755,
+      "longitude": 152.9762,
+      "stayMinutes": 60,
+      "styleTags": [
+        "garden",
+        "cafe",
+        "family",
+        "brunch"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Botanical Brisbane",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Mount Coot-tha",
+      "addressLine": "152 Mount Coot-tha Road, Toowong",
+      "latitude": -27.4757,
+      "longitude": 152.976,
+      "stayMinutes": 75,
+      "styleTags": [
+        "garden",
+        "family",
+        "casual",
+        "botanic_gardens"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Sono Japanese Restaurant Portside Wharf",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Northshore Hamilton",
+      "addressLine": "Portside Wharf, 39 Hercules Street, Hamilton",
+      "latitude": -27.4401,
+      "longitude": 153.0708,
+      "stayMinutes": 90,
+      "styleTags": [
+        "japanese",
+        "riverside",
+        "portside",
+        "upscale"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 88,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "japanese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Byblos Brisbane",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Northshore Hamilton",
+      "addressLine": "Portside Wharf, 39 Hercules Street, Hamilton",
+      "latitude": -27.44,
+      "longitude": 153.0706,
+      "stayMinutes": 90,
+      "styleTags": [
+        "lebanese",
+        "riverside",
+        "portside",
+        "group_friendly"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 86,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "lebanese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Fosh Portside",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Northshore Hamilton",
+      "addressLine": "Portside Wharf, 39 Hercules Street, Hamilton",
+      "latitude": -27.4402,
+      "longitude": 153.0707,
+      "stayMinutes": 90,
+      "styleTags": [
+        "seafood",
+        "riverside",
+        "portside",
+        "upscale"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "seafood",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "1889 Enoteca",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Woolloongabba",
+      "addressLine": "10-12 Logan Road, Woolloongabba",
+      "latitude": -27.4869,
+      "longitude": 153.0369,
+      "stayMinutes": 90,
+      "styleTags": [
+        "italian",
+        "heritage",
+        "upscale"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 86,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Pawpaw Cafe",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "Woolloongabba",
+      "addressLine": "898 Stanley Street East, Woolloongabba",
+      "latitude": -27.486,
+      "longitude": 153.0417,
+      "stayMinutes": 60,
+      "styleTags": [
+        "cafe",
+        "brunch",
+        "family",
+        "casual"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Electric Avenue Jr",
+      "type": "restaurant",
+      "category": "bar_restaurant",
+      "city": "Brisbane",
+      "area": "Woolloongabba",
+      "addressLine": "23 Logan Road, Woolloongabba",
+      "latitude": -27.4874,
+      "longitude": 153.0368,
+      "stayMinutes": 75,
+      "styleTags": [
+        "bar",
+        "casual",
+        "dinner",
+        "gabba_precinct"
+      ],
+      "timeSlots": [
+        "dinner"
+      ],
+      "priority": 76,
+      "familyFriendly": false,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "New Farm Deli & Cafe",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "New Farm",
+      "addressLine": "900 Brunswick Street, New Farm",
+      "latitude": -27.4684,
+      "longitude": 153.0479,
+      "stayMinutes": 60,
+      "styleTags": [
+        "cafe",
+        "italian",
+        "local",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "italian cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Vine Restaurant Bar",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "New Farm",
+      "addressLine": "158 Moray Street, New Farm",
+      "latitude": -27.4693,
+      "longitude": 153.044,
+      "stayMinutes": 90,
+      "styleTags": [
+        "italian",
+        "dinner",
+        "neighbourhood",
+        "date_night"
+      ],
+      "timeSlots": [
+        "dinner"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "The Smoke BBQ",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "New Farm",
+      "addressLine": "85 Merthyr Road, New Farm",
+      "latitude": -27.4674,
+      "longitude": 153.0466,
+      "stayMinutes": 75,
+      "styleTags": [
+        "bbq",
+        "casual",
+        "family",
+        "dinner"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "american bbq",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Zero Fox",
+      "type": "restaurant",
+      "category": "bar_restaurant",
+      "city": "Brisbane",
+      "area": "Teneriffe",
+      "addressLine": "36 Vernon Terrace, Teneriffe",
+      "latitude": -27.456,
+      "longitude": 153.0491,
+      "stayMinutes": 75,
+      "styleTags": [
+        "japanese",
+        "korean",
+        "casual",
+        "riverside_nearby"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "japanese korean",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Kin + Co",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "Teneriffe",
+      "addressLine": "Macquarie Street, Teneriffe",
+      "latitude": -27.4562,
+      "longitude": 153.0483,
+      "stayMinutes": 60,
+      "styleTags": [
+        "cafe",
+        "brunch",
+        "local",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "La Lune Wine Co",
+      "type": "restaurant",
+      "category": "wine_bar_restaurant",
+      "city": "Brisbane",
+      "area": "South Brisbane",
+      "addressLine": "Fish Lane, South Brisbane",
+      "latitude": -27.4736,
+      "longitude": 153.0168,
+      "stayMinutes": 75,
+      "styleTags": [
+        "wine_bar",
+        "fish_lane",
+        "dinner",
+        "modern"
+      ],
+      "timeSlots": [
+        "dinner"
+      ],
+      "priority": 80,
+      "familyFriendly": false,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Maeve Wine",
+      "type": "restaurant",
+      "category": "wine_bar_restaurant",
+      "city": "Brisbane",
+      "area": "South Brisbane",
+      "addressLine": "39 Melbourne Street, South Brisbane",
+      "latitude": -27.474,
+      "longitude": 153.016,
+      "stayMinutes": 75,
+      "styleTags": [
+        "wine_bar",
+        "dinner",
+        "modern",
+        "south_brisbane"
+      ],
+      "timeSlots": [
+        "dinner"
+      ],
+      "priority": 80,
+      "familyFriendly": false,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Ahmet's Turkish Restaurant",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "South Brisbane",
+      "addressLine": "168 Grey Street, South Brisbane",
+      "latitude": -27.4768,
+      "longitude": 153.0209,
+      "stayMinutes": 75,
+      "styleTags": [
+        "turkish",
+        "family",
+        "casual",
+        "south_bank"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "turkish",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "The Gunshop Cafe",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "West End",
+      "addressLine": "53 Mollison Street, West End",
+      "latitude": -27.479,
+      "longitude": 153.0125,
+      "stayMinutes": 60,
+      "styleTags": [
+        "cafe",
+        "brunch",
+        "local",
+        "family"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 82,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Lefkas Taverna",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "West End",
+      "addressLine": "170 Hardgrave Road, West End",
+      "latitude": -27.4835,
+      "longitude": 153.006,
+      "stayMinutes": 90,
+      "styleTags": [
+        "greek",
+        "family",
+        "dinner",
+        "local"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "greek",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "OFFICIAL_OR_WELL_KNOWN"
+    },
+    {
+      "name": "Joey's",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Kangaroo Point",
+      "addressLine": "29 River Terrace, Kangaroo Point",
+      "latitude": -27.4798,
+      "longitude": 153.0353,
+      "stayMinutes": 75,
+      "styleTags": [
+        "view",
+        "cliffs",
+        "modern",
+        "dinner"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 84,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Medley Cafe & Restaurant",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Kangaroo Point",
+      "addressLine": "62 Wharf Street, Kangaroo Point",
+      "latitude": -27.4671,
+      "longitude": 153.0379,
+      "stayMinutes": 75,
+      "styleTags": [
+        "riverside",
+        "cafe",
+        "family",
+        "casual"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 78,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Kettle & Tin",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Paddington",
+      "addressLine": "215 Given Terrace, Paddington",
+      "latitude": -27.4596,
+      "longitude": 153.007,
+      "stayMinutes": 75,
+      "styleTags": [
+        "casual",
+        "brunch",
+        "dinner",
+        "local"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Ngon Brisbane",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Paddington",
+      "addressLine": "220 Given Terrace, Paddington",
+      "latitude": -27.4597,
+      "longitude": 153.0068,
+      "stayMinutes": 75,
+      "styleTags": [
+        "vietnamese",
+        "casual",
+        "local",
+        "dinner"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 76,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "vietnamese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Tumbling Stone Restaurant & Bar",
+      "type": "restaurant",
+      "category": "hotel_restaurant",
+      "city": "Brisbane",
+      "area": "Spring Hill",
+      "addressLine": "477 Boundary Street, Spring Hill",
+      "latitude": -27.4613,
+      "longitude": 153.0245,
+      "stayMinutes": 75,
+      "styleTags": [
+        "hotel_dining",
+        "casual",
+        "spring_hill"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 72,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "modern australian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "The Alliance Hotel",
+      "type": "restaurant",
+      "category": "pub_restaurant",
+      "city": "Brisbane",
+      "area": "Spring Hill",
+      "addressLine": "320 Boundary Street, Spring Hill",
+      "latitude": -27.4616,
+      "longitude": 153.0279,
+      "stayMinutes": 75,
+      "styleTags": [
+        "pub",
+        "heritage",
+        "casual",
+        "dinner"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "pub food",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Libertine Restaurant & Cocktail Bar",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Roma Street / Petrie Terrace",
+      "addressLine": "The Barracks, 61 Petrie Terrace, Brisbane",
+      "latitude": -27.4642,
+      "longitude": 153.0144,
+      "stayMinutes": 90,
+      "styleTags": [
+        "french_vietnamese",
+        "barracks",
+        "dinner"
+      ],
+      "timeSlots": [
+        "dinner"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "high",
+      "mealTypes": [
+        "dinner"
+      ],
+      "cuisine": "french vietnamese",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Scout Cafe",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "Roma Street / Petrie Terrace",
+      "addressLine": "190 Petrie Terrace, Brisbane",
+      "latitude": -27.4635,
+      "longitude": 153.0125,
+      "stayMinutes": 60,
+      "styleTags": [
+        "cafe",
+        "brunch",
+        "local",
+        "casual"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Arrivederci Pizzeria",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Milton / Park Road",
+      "addressLine": "1 Park Road, Milton",
+      "latitude": -27.4697,
+      "longitude": 153.0044,
+      "stayMinutes": 75,
+      "styleTags": [
+        "italian",
+        "pizza",
+        "family",
+        "park_road"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 80,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "italian",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Tuk Tuk Bar",
+      "type": "restaurant",
+      "category": "restaurant",
+      "city": "Brisbane",
+      "area": "Milton / Park Road",
+      "addressLine": "Park Road, Milton",
+      "latitude": -27.47,
+      "longitude": 153.0047,
+      "stayMinutes": 75,
+      "styleTags": [
+        "thai",
+        "casual",
+        "park_road",
+        "dinner"
+      ],
+      "timeSlots": [
+        "lunch",
+        "dinner"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch",
+        "dinner"
+      ],
+      "cuisine": "thai",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Saint Lucy Caffe e Cucina",
+      "type": "restaurant",
+      "category": "cafe_restaurant",
+      "city": "Brisbane",
+      "area": "St Lucia",
+      "addressLine": "University of Queensland, St Lucia",
+      "latitude": -27.4978,
+      "longitude": 153.0134,
+      "stayMinutes": 60,
+      "styleTags": [
+        "cafe",
+        "italian",
+        "university",
+        "lunch"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 74,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "italian cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    },
+    {
+      "name": "Wordsmiths Cafe",
+      "type": "restaurant",
+      "category": "cafe",
+      "city": "Brisbane",
+      "area": "St Lucia",
+      "addressLine": "University of Queensland, St Lucia",
+      "latitude": -27.4974,
+      "longitude": 153.0142,
+      "stayMinutes": 45,
+      "styleTags": [
+        "cafe",
+        "university",
+        "casual",
+        "lunch"
+      ],
+      "timeSlots": [
+        "lunch"
+      ],
+      "priority": 70,
+      "familyFriendly": true,
+      "budgetLevel": "low",
+      "mealTypes": [
+        "lunch"
+      ],
+      "cuisine": "cafe",
+      "source": "LOCAL_CURATED",
+      "verificationLevel": "WELL_KNOWN_OR_MAP_VERIFIED"
+    }
+  ]
+}

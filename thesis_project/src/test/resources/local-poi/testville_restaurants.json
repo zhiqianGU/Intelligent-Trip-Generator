@@ -1,0 +1,40 @@
+{
+  "city": "Testville",
+  "country": "Testland",
+  "state": "TS",
+  "currency": "TST",
+  "items": [
+    {
+      "name": "Testville Lunch Room",
+      "category": "restaurant",
+      "area": "Central",
+      "addressLine": "4 Lunch Lane, Testville",
+      "latitude": 10.003,
+      "longitude": 20.003,
+      "stayMinutes": 60,
+      "priority": 85,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": ["lunch"],
+      "cuisine": "local",
+      "source": "LOCAL_TEST",
+      "verificationLevel": "TEST"
+    },
+    {
+      "name": "Testville Dinner Room",
+      "category": "restaurant",
+      "area": "Central",
+      "addressLine": "5 Dinner Lane, Testville",
+      "latitude": 10.004,
+      "longitude": 20.004,
+      "stayMinutes": 75,
+      "priority": 85,
+      "familyFriendly": true,
+      "budgetLevel": "medium",
+      "mealTypes": ["dinner"],
+      "cuisine": "local",
+      "source": "LOCAL_TEST",
+      "verificationLevel": "TEST"
+    }
+  ]
+}

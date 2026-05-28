@@ -122,6 +122,46 @@ public class PlanService {
         if (affected == 0) throw ErrorCode.NOT_FOUND.ex("plan not found or no permission");
     }
 
+    @Transactional
+    public void updatePlanCopy(long userId, long planId, thesis.project.gu.response.PlanDraftResponse draft) {
+        var plan = planMapper.findPlanById(planId, userId);
+        if (plan == null) throw ErrorCode.NOT_FOUND.ex("plan not found or no permission");
+        if (draft == null || draft.daysPlan() == null) {
+            return;
+        }
+
+        for (var day : draft.daysPlan()) {
+            if (day == null || day.dayIndex() <= 0) {
+                continue;
+            }
+            planMapper.updateDayCopy(
+                    planId,
+                    userId,
+                    day.dayIndex(),
+                    day.note(),
+                    day.hotel() == null ? null : day.hotel().reason(),
+                    day.hotel() == null ? null : day.hotel().tip()
+            );
+            if (day.stops() == null) {
+                continue;
+            }
+            for (int i = 0; i < day.stops().size(); i++) {
+                var stop = day.stops().get(i);
+                if (stop == null) {
+                    continue;
+                }
+                planMapper.updateStopCopy(
+                        planId,
+                        userId,
+                        day.dayIndex(),
+                        i + 1,
+                        stop.reason(),
+                        stop.tip()
+                );
+            }
+        }
+    }
+
     // 简单分页封装
     @Transactional
     public void deletePlan(long userId, long planId) {

@@ -48,7 +48,7 @@ If unsure, keep descriptions factual and practical rather than vague or promotio
         """;
     }
 
-    public static String user(CreatePlanReq req) {
+    public static String user(CreatePlanReq req, String daySkeletonHints) {
         String style = (req.style() == null || req.style().isEmpty()) ? "[]" : req.style().toString();
         String budget = (req.budget() == null) ? "null" : req.budget().toString();
         int adults = req.party() != null && req.party().adults() != null ? req.party().adults() : 1;
@@ -56,6 +56,9 @@ If unsure, keep descriptions factual and practical rather than vague or promotio
         String pace = (req.pace() == null || req.pace().isBlank()) ? "normal" : req.pace();
         String departureDate = (req.departureDate() == null || req.departureDate().isBlank()) ? "unspecified" : req.departureDate().trim();
         String compositionPolicy = compositionPolicy(req);
+        String skeletonHints = daySkeletonHints == null || daySkeletonHints.isBlank()
+                ? "none"
+                : daySkeletonHints.trim();
 
         return """
 Generate a travel itinerary with the following constraints.
@@ -72,6 +75,9 @@ Return JSON only.
 Itinerary composition policy:
 %s
 
+Day skeleton constraints (backend-provided, if present):
+%s
+
 Required JSON schema:
 {
   "city": "<city name in English>",
@@ -79,7 +85,7 @@ Required JSON schema:
   "days": <int>,
   "currency": "<for example AUD>",
   "party": {"adults": <int>, "kids": <int>},
-  "pace": "relaxed|normal|rush",
+  "pace": "relax|relaxed|moderate|normal|fast|rush",
   "title": "<short factual itinerary title in English>",
   "overview": "<1 short factual trip overview in English>",
   "daysPlan": [
@@ -177,6 +183,8 @@ Formatting and planning rules:
 38. Reasons and tips should be minimal, specific, and low-risk. Prefer area, sequencing, pacing, and visit-focus guidance over generic "check details" or "book ahead" templates.
 39. Do not create polished narrative in the main generation step. The copy-polish step will rewrite copy later after backend verification.
 40. Day notes must not name any restaurant, attraction, area, transport mode, or activity that is not already present in the stops array.
+41. If day skeleton constraints are provided by backend, treat primaryArea and effectiveNonMeal ranges as hard planning constraints for each day.
+42. Non-meal sightseeing POIs must be unique across the trip. Do not repeat the same attraction, museum, park, lookout, landmark, gallery, or equivalent non-meal POI on multiple days.
 
 Compact planning example guidance:
 - lunch and dinner are both explicitly present
@@ -184,9 +192,149 @@ Compact planning example guidance:
 - there are no large unexplained idle gaps
 - copy is concise and factual; do not copy example city patterns or place names
 
+Hard failure prevention:
+- Before finalizing output, check every day for missing lunch, missing dinner, oversized idle gaps, and remote-district zig-zagging.
+- Before finalizing output, check the whole trip for repeated non-meal POIs across days and replace duplicates with different real POIs.
+- For trips with many days, prefer conservative, high-confidence, geographically compact planning over aggressive variety.
+- If a candidate stop would force a long cross-city detour and return on the same day, choose a closer replacement instead.
+- If uncertain between a novel low-confidence POI and a familiar high-confidence POI, choose the high-confidence POI.
+
 Now generate the actual itinerary for the requested city and constraints.
         """.formatted(
-                req.city(), req.days(), budget, adults, kids, style, pace, departureDate, compositionPolicy
+                req.city(), req.days(), budget, adults, kids, style, pace, departureDate, compositionPolicy, skeletonHints
+        );
+    }
+
+    public static String dayUser(
+            CreatePlanReq req,
+            int dayIndex,
+            int totalDays,
+            String currentDaySkeleton,
+            String adjacentDayContext,
+            String usedPoiHints
+    ) {
+        String style = (req.style() == null || req.style().isEmpty()) ? "[]" : req.style().toString();
+        String budget = (req.budget() == null) ? "null" : req.budget().toString();
+        int adults = req.party() != null && req.party().adults() != null ? req.party().adults() : 1;
+        int kids = req.party() != null && req.party().kids() != null ? req.party().kids() : 0;
+        String pace = (req.pace() == null || req.pace().isBlank()) ? "normal" : req.pace();
+        String departureDate = (req.departureDate() == null || req.departureDate().isBlank()) ? "unspecified" : req.departureDate().trim();
+        String compositionPolicy = compositionPolicy(req);
+        String adjacentContext = adjacentDayContext == null || adjacentDayContext.isBlank()
+                ? "none"
+                : adjacentDayContext.trim();
+        String skeleton = currentDaySkeleton == null || currentDaySkeleton.isBlank()
+                ? "none"
+                : currentDaySkeleton.trim();
+        String usedPois = usedPoiHints == null || usedPoiHints.isBlank()
+                ? "none"
+                : usedPoiHints.trim();
+
+        return """
+Generate exactly one day of a travel itinerary.
+Return JSON only.
+
+- Destination city: %s
+- Requested trip days: %d
+- Generate only dayIndex: %d
+- Budget per person total: %s
+- Party: adults=%d, kids=%d
+- Preferred styles: %s
+- Pace: %s
+- Departure date: %s
+
+Itinerary composition policy:
+%s
+
+Current day skeleton constraint:
+%s
+
+Adjacent day context:
+%s
+
+Already used non-meal POIs on other generated or locked days:
+%s
+
+Return this JSON schema only:
+{
+  "city": "<city name in English>",
+  "country": "<country name in English>",
+  "days": %d,
+  "currency": "<for example AUD>",
+  "party": {"adults": <int>, "kids": <int>},
+  "pace": "relax|relaxed|moderate|normal|fast|rush",
+  "title": "<very short title, 3-6 words>",
+  "overview": "<very short overview, 6-12 words>",
+  "daysPlan": [
+    {
+      "dayIndex": %d,
+      "theme": "<very short day theme>",
+      "morningNote": "<very short morning summary or null>",
+      "afternoonNote": "<very short afternoon summary or null>",
+      "eveningNote": "<very short evening summary or null>",
+      "hotel": {
+        "name": "<hotel name>",
+        "addressLine": "<short address line or null>",
+        "suburb": "<suburb or null>",
+        "city": "<city or null>",
+        "state": "<state or null>",
+        "postcode": "<postcode or null>",
+        "country": "<country or null>",
+        "category": "hotel",
+        "stayMinutes": null,
+        "timeSlot": "night",
+        "reason": "<very short reason or null>",
+        "tip": "<very short tip or null>",
+        "url": "<URL or null>"
+      },
+      "stops": [
+        {
+          "name": "<place name>",
+          "addressLine": "<short address line or null>",
+          "suburb": "<suburb or null>",
+          "city": "<city or null>",
+          "state": "<state or null>",
+          "postcode": "<postcode or null>",
+          "country": "<country or null>",
+          "category": "<attraction|museum|restaurant|park|shop|nightlife|family...>",
+          "stayMinutes": <int>,
+          "timeSlot": "<morning|lunch|afternoon|sunset|evening>",
+          "startTime": "<HH:mm>",
+          "endTime": "<HH:mm>",
+          "mealType": "<for food stops: breakfast|brunch|lunch|dinner|snack|dessert|drinks, otherwise null>",
+          "preferredArea": "<short area label or null>",
+          "cuisine": "<for food stops: cuisine or dining style, otherwise null>",
+          "vibe": "<for food stops: short dining vibe, otherwise null>",
+          "budgetLevel": "<for food stops: budget|midrange|premium, otherwise null>",
+          "reason": "<very short reason or null>",
+          "tip": "<very short tip or null>",
+          "url": "<URL or null>"
+        }
+      ],
+      "note": "<very short day summary or null>"
+    }
+  ]
+}
+
+Rules:
+1. Return exactly one day in daysPlan, and that dayIndex must be %d.
+2. Treat the current day skeleton constraint as hard.
+3. Keep the day's non-meal stop count inside the skeleton effective range unless real-world feasibility forces fewer.
+4. Every generated day must include one real lunch venue and one real dinner venue.
+5. Keep this day geographically compact around one main area and at most one nearby secondary area.
+6. Use the adjacent day context only to avoid repeating the same area pattern on every day.
+7. Do not output any extra explanation or any second day.
+8. Keep copy short and factual. The backend will rewrite copy later.
+9. Prefer null over long prose for optional text fields.
+10. Keep every string field compact to reduce output length. Do not write long addresses, long descriptions, or full marketing copy.
+11. For non-meal stops, preferredArea may be null if the area is already obvious from suburb or city.
+12. Before finalizing the day, verify there is exactly one lunch venue and one dinner venue, tight adjacent timing, and no remote out-and-back district jump.
+13. The generated day must not repeat a non-meal POI that already appears in the adjacent day context or in the current day skeleton hints.
+14. The generated day must not repeat any non-meal POI listed in the already used non-meal POIs block. Replace it with a different real POI in the same area and of a similar visit type.
+15. If uncertain, keep the day conservative, compact, and high-confidence rather than trying to maximize variety.
+        """.formatted(
+                req.city(), totalDays, dayIndex, budget, adults, kids, style, pace, departureDate,
+                compositionPolicy, skeleton, adjacentContext, usedPois, totalDays, dayIndex, dayIndex
         );
     }
 

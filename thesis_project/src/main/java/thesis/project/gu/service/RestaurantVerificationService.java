@@ -1,18 +1,37 @@
 package thesis.project.gu.service;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.springframework.stereotype.Service;
 import thesis.project.gu.client.GooglePlacesClient;
 import thesis.project.gu.response.PlanDraftResponse;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
 public class RestaurantVerificationService {
     private static final Pattern POSTCODE_PATTERN = Pattern.compile("\\b\\d{4,5}\\b");
+    private static final int DAY_MEAL_SEARCH_MAX_CONCURRENCY = 4;
+    private static final int GOOGLE_PLACES_SEARCH_BULKHEAD_CONCURRENCY = 6;
+    private static final Duration GOOGLE_PLACES_SEARCH_CACHE_TTL = Duration.ofMinutes(5);
+    private static final Cache<String, List<GooglePlacesClient.PlaceCandidate>> GOOGLE_PLACES_SEARCH_L1_CACHE = Caffeine.newBuilder()
+            .maximumSize(20_000)
+            .expireAfterWrite(GOOGLE_PLACES_SEARCH_CACHE_TTL)
+            .build();
+    private static final Semaphore GOOGLE_PLACES_SEARCH_BULKHEAD = new Semaphore(GOOGLE_PLACES_SEARCH_BULKHEAD_CONCURRENCY, true);
     private final GooglePlacesClient googlePlacesClient;
 
     public RestaurantVerificationService(GooglePlacesClient googlePlacesClient) {
@@ -20,6 +39,13 @@ public class RestaurantVerificationService {
     }
 
     public VerificationResult verifyAndNormalize(PlanDraftResponse draft) {
+        return verifyAndNormalizeSelective(draft, null);
+    }
+
+    public VerificationResult verifyAndNormalizeSelective(
+            PlanDraftResponse draft,
+            Map<Integer, java.util.Set<Integer>> targetStopIndexesByDay
+    ) {
         if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty() || !googlePlacesClient.isEnabled()) {
             return new VerificationResult(draft, List.of());
         }
@@ -34,43 +60,76 @@ public class RestaurantVerificationService {
             String fallbackArea = deriveArea(day.hotel(), draft.city());
             PlanDraftResponse.Place previousStop = null;
             List<String> dayStrictMealVenues = new ArrayList<>();
-            for (int i = 0; i < stops.size(); i++) {
-                PlanDraftResponse.Place stop = stops.get(i);
-                if (isThemeParkInternalMeal(stop, stops)) {
-                    PlanDraftResponse.Place themeParkStop = firstThemeParkStop(stops);
-                    PlanDraftResponse.Place normalizedThemeParkMeal = buildThemeParkInternalLunch(themeParkStop, draft.city());
-                    normalizedStops.add(normalizedThemeParkMeal);
-                    previousStop = normalizedThemeParkMeal;
-                    continue;
-                }
-                if (!isFoodStop(stop)) {
-                    normalizedStops.add(stop);
-                    previousStop = stop;
-                    String derived = deriveArea(stop, draft.city());
-                    if (!derived.isBlank()) {
-                        fallbackArea = derived;
+            ExecutorService daySearchExecutor = newDayMealSearchExecutor(stops);
+            Map<String, CompletableFuture<List<GooglePlacesClient.PlaceCandidate>>> daySearchFutures = new ConcurrentHashMap<>();
+            try {
+                prewarmDayFoodSearches(stops, draft.city(), fallbackArea, day.dayIndex(), targetStopIndexesByDay, daySearchFutures, daySearchExecutor);
+                for (int i = 0; i < stops.size(); i++) {
+                    PlanDraftResponse.Place stop = stops.get(i);
+                    if (isThemeParkInternalMeal(stop, stops)) {
+                        PlanDraftResponse.Place themeParkStop = firstThemeParkStop(stops);
+                        PlanDraftResponse.Place normalizedThemeParkMeal = buildThemeParkInternalLunch(themeParkStop, draft.city());
+                        normalizedStops.add(normalizedThemeParkMeal);
+                        previousStop = normalizedThemeParkMeal;
+                        continue;
                     }
-                    continue;
-                }
-                PlanDraftResponse.Place nextStop = nextNonMealStop(stops, i + 1);
-                VerifiedStop verified = verifyFoodStop(stop, draft.city(), fallbackArea, previousStop, nextStop, dayStrictMealVenues, usedStrictMealVenues);
-                if (verified.issue != null) {
-                    issues.add("day-" + day.dayIndex() + "-stop-" + (i + 1) + "-" + verified.issue);
-                }
-                PlanDraftResponse.Place normalizedStop = verified.place != null ? verified.place : stop;
-                normalizedStops.add(normalizedStop);
-                previousStop = normalizedStop;
-                if (isStrictMealStop(normalizedStop)) {
-                    String venueKey = venueKey(normalizedStop);
-                    if (!venueKey.isBlank()) {
-                        if (!dayStrictMealVenues.contains(venueKey)) {
-                            dayStrictMealVenues.add(venueKey);
+                    if (!isFoodStop(stop)) {
+                        normalizedStops.add(stop);
+                        previousStop = stop;
+                        String derived = deriveArea(stop, draft.city());
+                        if (!derived.isBlank()) {
+                            fallbackArea = derived;
                         }
-                        if (!usedStrictMealVenues.contains(venueKey)) {
-                            usedStrictMealVenues.add(venueKey);
+                        continue;
+                    }
+                    if (!shouldVerifyTargetedStop(day.dayIndex(), i, stop, targetStopIndexesByDay)) {
+                        normalizedStops.add(stop);
+                        previousStop = stop;
+                        if (isStrictMealStop(stop)) {
+                            String venueKey = venueKey(stop);
+                            if (!venueKey.isBlank()) {
+                                if (!dayStrictMealVenues.contains(venueKey)) {
+                                    dayStrictMealVenues.add(venueKey);
+                                }
+                                if (!usedStrictMealVenues.contains(venueKey)) {
+                                    usedStrictMealVenues.add(venueKey);
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    PlanDraftResponse.Place nextStop = nextNonMealStop(stops, i + 1);
+                    VerifiedStop verified = verifyFoodStop(
+                            stop,
+                            draft.city(),
+                            fallbackArea,
+                            previousStop,
+                            nextStop,
+                            dayStrictMealVenues,
+                            usedStrictMealVenues,
+                            daySearchFutures,
+                            daySearchExecutor
+                    );
+                    if (verified.issue != null) {
+                        issues.add("day-" + day.dayIndex() + "-stop-" + (i + 1) + "-" + verified.issue);
+                    }
+                    PlanDraftResponse.Place normalizedStop = verified.place != null ? verified.place : stop;
+                    normalizedStops.add(normalizedStop);
+                    previousStop = normalizedStop;
+                    if (isStrictMealStop(normalizedStop)) {
+                        String venueKey = venueKey(normalizedStop);
+                        if (!venueKey.isBlank()) {
+                            if (!dayStrictMealVenues.contains(venueKey)) {
+                                dayStrictMealVenues.add(venueKey);
+                            }
+                            if (!usedStrictMealVenues.contains(venueKey)) {
+                                usedStrictMealVenues.add(venueKey);
+                            }
                         }
                     }
                 }
+            } finally {
+                daySearchExecutor.shutdownNow();
             }
 
             normalizedDays.add(new PlanDraftResponse.DayPlan(
@@ -99,6 +158,25 @@ public class RestaurantVerificationService {
         ), issues);
     }
 
+    private boolean shouldVerifyTargetedStop(
+            int dayIndex,
+            int stopIndex,
+            PlanDraftResponse.Place stop,
+            Map<Integer, java.util.Set<Integer>> targetStopIndexesByDay
+    ) {
+        if (!isFoodStop(stop)) {
+            return false;
+        }
+        if (targetStopIndexesByDay == null || targetStopIndexesByDay.isEmpty()) {
+            return true;
+        }
+        java.util.Set<Integer> targetedIndexes = targetStopIndexesByDay.get(dayIndex);
+        if (targetedIndexes == null || targetedIndexes.isEmpty()) {
+            return false;
+        }
+        return targetedIndexes.contains(stopIndex);
+    }
+
     public PlanDraftResponse ensureRequiredMeals(PlanDraftResponse draft) {
         if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty() || !googlePlacesClient.isEnabled()) {
             return draft;
@@ -109,6 +187,9 @@ public class RestaurantVerificationService {
         for (PlanDraftResponse.DayPlan day : draft.daysPlan()) {
             List<PlanDraftResponse.Place> workingStops = new ArrayList<>(day.stops() == null ? List.of() : day.stops());
             List<String> dayStrictMealVenues = collectStrictMealVenueKeys(workingStops);
+            ExecutorService daySearchExecutor = newDayMealSearchExecutor(workingStops);
+            Map<String, CompletableFuture<List<GooglePlacesClient.PlaceCandidate>>> daySearchFutures = new ConcurrentHashMap<>();
+            try {
             for (String venueKey : dayStrictMealVenues) {
                 if (!venueKey.isBlank() && !usedStrictMealVenues.contains(venueKey)) {
                     usedStrictMealVenues.add(venueKey);
@@ -118,7 +199,7 @@ public class RestaurantVerificationService {
             if (!hasVerifiedMealStop(workingStops, "lunch")) {
                 PlanDraftResponse.Place themeParkStop = firstThemeParkStop(workingStops);
                 PlanDraftResponse.Place lunchStop = themeParkStop == null
-                        ? synthesizeMealStop(day, workingStops, draft.city(), "lunch", dayStrictMealVenues, usedStrictMealVenues)
+                        ? synthesizeMealStop(day, workingStops, draft.city(), "lunch", dayStrictMealVenues, usedStrictMealVenues, daySearchFutures, daySearchExecutor)
                         : buildThemeParkInternalLunch(themeParkStop, draft.city());
                 if (lunchStop != null) {
                     int lunchIndex = findMealInsertionIndex(workingStops, "lunch");
@@ -132,7 +213,7 @@ public class RestaurantVerificationService {
             }
 
             if (!hasVerifiedMealStop(workingStops, "dinner")) {
-                PlanDraftResponse.Place dinnerStop = synthesizeMealStop(day, workingStops, draft.city(), "dinner", dayStrictMealVenues, usedStrictMealVenues);
+                PlanDraftResponse.Place dinnerStop = synthesizeMealStop(day, workingStops, draft.city(), "dinner", dayStrictMealVenues, usedStrictMealVenues, daySearchFutures, daySearchExecutor);
                 if (dinnerStop != null) {
                     int dinnerIndex = findMealInsertionIndex(workingStops, "dinner");
                     workingStops.add(dinnerIndex, dinnerStop);
@@ -142,6 +223,9 @@ public class RestaurantVerificationService {
                         usedStrictMealVenues.add(venueKey);
                     }
                 }
+            }
+            } finally {
+                daySearchExecutor.shutdownNow();
             }
 
             updatedDays.add(new PlanDraftResponse.DayPlan(
@@ -177,7 +261,9 @@ public class RestaurantVerificationService {
             PlanDraftResponse.Place previousStop,
             PlanDraftResponse.Place nextStop,
             List<String> dayStrictMealVenues,
-            List<String> usedStrictMealVenues
+            List<String> usedStrictMealVenues,
+            Map<String, CompletableFuture<List<GooglePlacesClient.PlaceCandidate>>> daySearchFutures,
+            ExecutorService daySearchExecutor
     ) {
         String searchCity = city == null || city.isBlank() ? stop.city() : city;
         boolean strictMealStop = isStrictMealStop(stop);
@@ -192,8 +278,9 @@ public class RestaurantVerificationService {
                 : stop;
         if (strictMealStop) {
             boolean hadCandidates = false;
-            for (String query : buildQueries(scoringStop, mealSearchCity, fallbackArea, previousStop)) {
-                List<GooglePlacesClient.PlaceCandidate> strictCandidates = googlePlacesClient.searchText(query, mealSearchCity);
+            List<String> strictQueries = buildQueries(scoringStop, mealSearchCity, fallbackArea, previousStop);
+            List<List<GooglePlacesClient.PlaceCandidate>> strictResults = resolveQueryBatchResults(strictQueries, mealSearchCity, daySearchFutures, daySearchExecutor);
+            for (List<GooglePlacesClient.PlaceCandidate> strictCandidates : strictResults) {
                 if (strictCandidates.isEmpty()) {
                     continue;
                 }
@@ -208,8 +295,9 @@ public class RestaurantVerificationService {
 
         List<GooglePlacesClient.PlaceCandidate> candidates = List.of();
         List<String> queries = buildQueries(scoringStop, searchCity, fallbackArea, previousStop);
-        for (String query : queries) {
-            candidates = googlePlacesClient.searchText(query, searchCity);
+        List<List<GooglePlacesClient.PlaceCandidate>> queryResults = resolveQueryBatchResults(queries, searchCity, daySearchFutures, daySearchExecutor);
+        for (List<GooglePlacesClient.PlaceCandidate> result : queryResults) {
+            candidates = result;
             if (!candidates.isEmpty()) {
                 break;
             }
@@ -377,7 +465,9 @@ public class RestaurantVerificationService {
             String city,
             String mealType,
             List<String> dayStrictMealVenues,
-            List<String> usedStrictMealVenues
+            List<String> usedStrictMealVenues,
+            Map<String, CompletableFuture<List<GooglePlacesClient.PlaceCandidate>>> daySearchFutures,
+            ExecutorService daySearchExecutor
     ) {
         AreaContext context = deriveMealAreaContext(day, stops, mealType, city);
         String mealSearchCity = effectiveMealSearchCity(city, mealType, context.previousStop());
@@ -411,8 +501,8 @@ public class RestaurantVerificationService {
 
         List<String> queries = buildQueries(prototype, mealSearchCity, context.area(), context.previousStop());
         addRelaxedMealQueries(queries, prototype, mealSearchCity, context.area());
-        for (String query : queries) {
-            List<GooglePlacesClient.PlaceCandidate> candidates = googlePlacesClient.searchText(query, mealSearchCity);
+        List<List<GooglePlacesClient.PlaceCandidate>> queryResults = resolveQueryBatchResults(queries, mealSearchCity, daySearchFutures, daySearchExecutor);
+        for (List<GooglePlacesClient.PlaceCandidate> candidates : queryResults) {
             GooglePlacesClient.PlaceCandidate best = candidates.stream()
                     .map(candidate -> new RankedCandidate(candidate, scoreRelaxedMeal(prototype, candidate, dayStrictMealVenues, usedStrictMealVenues)))
                     .sorted((a, b) -> Integer.compare(b.score, a.score))
@@ -429,6 +519,133 @@ public class RestaurantVerificationService {
             return normalizeCandidate(prototype, best, mealSearchCity, context.area());
         }
         return null;
+    }
+
+    private ExecutorService newDayMealSearchExecutor(List<PlanDraftResponse.Place> stops) {
+        int foodStops = (int) (stops == null ? 0 : stops.stream().filter(this::isFoodStop).count());
+        int poolSize = Math.max(1, Math.min(DAY_MEAL_SEARCH_MAX_CONCURRENCY, Math.max(1, foodStops)));
+        return Executors.newFixedThreadPool(poolSize);
+    }
+
+    private void prewarmDayFoodSearches(
+            List<PlanDraftResponse.Place> stops,
+            String city,
+            String initialFallbackArea,
+            int dayIndex,
+            Map<Integer, java.util.Set<Integer>> targetStopIndexesByDay,
+            Map<String, CompletableFuture<List<GooglePlacesClient.PlaceCandidate>>> daySearchFutures,
+            ExecutorService daySearchExecutor
+    ) {
+        if (stops == null || stops.isEmpty()) {
+            return;
+        }
+        String fallbackArea = safe(initialFallbackArea);
+        PlanDraftResponse.Place previousStop = null;
+        for (int i = 0; i < stops.size(); i++) {
+            PlanDraftResponse.Place stop = stops.get(i);
+            if (!isFoodStop(stop)) {
+                String derived = deriveArea(stop, city);
+                if (!derived.isBlank()) {
+                    fallbackArea = derived;
+                }
+                previousStop = stop;
+                continue;
+            }
+            if (!shouldVerifyTargetedStop(dayIndex, i, stop, targetStopIndexesByDay)) {
+                previousStop = stop;
+                continue;
+            }
+            PlanDraftResponse.Place nextStop = nextNonMealStop(stops, i + 1);
+            boolean strictMealStop = isStrictMealStop(stop);
+            String searchCity = city == null || city.isBlank() ? stop.city() : city;
+            String mealSearchCity = strictMealStop
+                    ? effectiveMealSearchCity(searchCity, stop, previousStop)
+                    : searchCity;
+            PlanDraftResponse.Place scoringStop = strictMealStop
+                    ? buildStrictMealPrototype(stop, mealSearchCity, fallbackArea, previousStop, nextStop)
+                    : stop;
+            List<String> queries = buildQueries(scoringStop, strictMealStop ? mealSearchCity : searchCity, fallbackArea, previousStop);
+            for (String query : queries) {
+                scheduleDaySearch(query, strictMealStop ? mealSearchCity : searchCity, daySearchFutures, daySearchExecutor);
+            }
+            previousStop = stop;
+        }
+    }
+
+    private List<List<GooglePlacesClient.PlaceCandidate>> resolveQueryBatchResults(
+            List<String> queries,
+            String city,
+            Map<String, CompletableFuture<List<GooglePlacesClient.PlaceCandidate>>> daySearchFutures,
+            ExecutorService daySearchExecutor
+    ) {
+        if (queries == null || queries.isEmpty()) {
+            return List.of();
+        }
+        List<CompletableFuture<List<GooglePlacesClient.PlaceCandidate>>> futures = queries.stream()
+                .map(query -> scheduleDaySearch(query, city, daySearchFutures, daySearchExecutor))
+                .toList();
+        List<List<GooglePlacesClient.PlaceCandidate>> results = new ArrayList<>(futures.size());
+        for (CompletableFuture<List<GooglePlacesClient.PlaceCandidate>> future : futures) {
+            results.add(joinSearchResult(future));
+        }
+        return results;
+    }
+
+    private CompletableFuture<List<GooglePlacesClient.PlaceCandidate>> scheduleDaySearch(
+            String query,
+            String city,
+            Map<String, CompletableFuture<List<GooglePlacesClient.PlaceCandidate>>> daySearchFutures,
+            ExecutorService daySearchExecutor
+    ) {
+        String cacheKey = normalize(query) + "|" + normalize(city);
+        List<GooglePlacesClient.PlaceCandidate> cached = GOOGLE_PLACES_SEARCH_L1_CACHE.getIfPresent(cacheKey);
+        if (cached != null) {
+            return CompletableFuture.completedFuture(cached);
+        }
+        return daySearchFutures.computeIfAbsent(cacheKey, ignored -> CompletableFuture.supplyAsync(() -> {
+                    List<GooglePlacesClient.PlaceCandidate> result = withBulkhead(
+                            GOOGLE_PLACES_SEARCH_BULKHEAD,
+                            () -> googlePlacesClient.searchText(query, city),
+                            List.of()
+                    );
+                    List<GooglePlacesClient.PlaceCandidate> safeResult = result == null ? List.of() : Collections.unmodifiableList(new ArrayList<>(result));
+                    GOOGLE_PLACES_SEARCH_L1_CACHE.put(cacheKey, safeResult);
+                    return safeResult;
+                },
+                daySearchExecutor
+        ));
+    }
+
+    private List<GooglePlacesClient.PlaceCandidate> joinSearchResult(CompletableFuture<List<GooglePlacesClient.PlaceCandidate>> future) {
+        try {
+            List<GooglePlacesClient.PlaceCandidate> result = future.join();
+            return result == null ? List.of() : result;
+        } catch (CompletionException ex) {
+            return List.of();
+        }
+    }
+
+    private <T> T withBulkhead(Semaphore semaphore, SupplierWithRuntimeException<T> supplier, T fallback) {
+        boolean acquired = false;
+        try {
+            semaphore.acquire();
+            acquired = true;
+            return supplier.get();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (RuntimeException ex) {
+            return fallback;
+        } finally {
+            if (acquired) {
+                semaphore.release();
+            }
+        }
+    }
+
+    @FunctionalInterface
+    private interface SupplierWithRuntimeException<T> {
+        T get();
     }
 
     private String effectiveMealSearchCity(String defaultCity, PlanDraftResponse.Place mealStop, PlanDraftResponse.Place previousStop) {
