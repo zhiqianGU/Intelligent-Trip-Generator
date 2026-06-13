@@ -1,7 +1,7 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="thesis.project.gu.mapper.TripPlanMapper">
+<mapper namespace="thesis.project.gu.planhistory.persistence.TripPlanMapper">
     <insert id="insertPlan" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO trip_plan(user_id, title, city, days, budget_cents, party_adults, party_kids, pace, departure_date)
         VALUES (#{userId}, #{title}, #{city}, #{days}, #{budgetCents}, #{partyAdults}, #{partyKids}, #{pace}, #{departureDate})
@@ -71,7 +71,7 @@
         VALUES (#{dayId}, #{seq}, #{placeId}, #{dwellMinutes}, #{note}, #{category}, #{timeSlot}, #{startTime}, #{endTime}, #{reason}, #{tip})
     </insert>
 
-    <resultMap id="planSummaryMap" type="thesis.project.gu.model.TripPlanSummary">
+    <resultMap id="planSummaryMap" type="thesis.project.gu.planhistory.domain.TripPlanSummary">
         <id    property="id"         column="id"/>
         <result property="title"     column="title"/>
         <result property="city"      column="city"/>
@@ -107,7 +107,7 @@
         LIMIT 1
     </select>
 
-    <select id="findDaysByPlan" resultType="thesis.project.gu.model.TripDayView">
+    <select id="findDaysByPlan" resultType="thesis.project.gu.planhistory.domain.TripDayView">
         SELECT id, day_index AS dayIndex, hotel_place_id AS hotelPlaceId, note,
                hotel_reason AS hotelReason, hotel_tip AS hotelTip
         FROM trip_day
@@ -115,7 +115,7 @@
         ORDER BY day_index ASC
     </select>
 
-    <select id="findStopsByDayIds" resultType="thesis.project.gu.model.TripStopView">
+    <select id="findStopsByDayIds" resultType="thesis.project.gu.planhistory.domain.TripStopView">
         SELECT id, day_id AS dayId, seq, place_id AS placeId, dwell_minutes AS dwellMinutes, note,
                category,
                time_slot AS timeSlot, start_time AS startTime, end_time AS endTime,
@@ -127,7 +127,7 @@
         </foreach>
         ORDER BY day_id, seq
     </select>
-    <select id="findPlacesByIds" resultType="thesis.project.gu.response.PlaceDetail">
+    <select id="findPlacesByIds" resultType="thesis.project.gu.planhistory.domain.PlaceDetail">
         select
         id,
         name,

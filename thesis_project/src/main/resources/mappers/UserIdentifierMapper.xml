@@ -1,8 +1,8 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="thesis.project.gu.mapper.UserIdentifierMapper">
+<mapper namespace="thesis.project.gu.user.persistence.UserIdentifierMapper">
 
-    <resultMap id="idenMap" type="thesis.project.gu.model.UserIdentifier">
+    <resultMap id="idenMap" type="thesis.project.gu.user.domain.UserIdentifier">
         <id     column="id"         property="id"/>
         <result column="user_id"    property="userId"/>
         <result column="id_type"    property="idType"/>

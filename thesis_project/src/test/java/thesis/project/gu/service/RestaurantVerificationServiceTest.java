@@ -4,9 +4,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import thesis.project.gu.client.GooglePlacesClient;
-import thesis.project.gu.req.CreatePlanReq;
-import thesis.project.gu.response.PlanDraftResponse;
+import thesis.project.gu.infrastructure.external.google.GooglePlacesClient;
+import thesis.project.gu.catalog.verification.RestaurantVerificationService;
+import thesis.project.gu.planning.api.dto.CreatePlanReq;
+import thesis.project.gu.planning.api.dto.PlanDraftResponse;
 
 import java.util.List;
 import java.util.Map;

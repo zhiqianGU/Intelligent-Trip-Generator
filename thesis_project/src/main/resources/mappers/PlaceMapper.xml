@@ -2,9 +2,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="thesis.project.gu.mapper.PlaceMapper">
+<mapper namespace="thesis.project.gu.catalog.persistence.PlaceMapper">
 
-  <resultMap id="PlaceMap" type="thesis.project.gu.model.Place">
+  <resultMap id="PlaceMap" type="thesis.project.gu.catalog.domain.Place">
     <id     property="id"          column="id"/>
     <result property="name"        column="name"/>
     <result property="address"     column="address"/>
@@ -75,7 +75,7 @@
       )
   </update>
 
-  <select id="findExistingId" parameterType="thesis.project.gu.model.Place" resultType="long">
+  <select id="findExistingId" parameterType="thesis.project.gu.catalog.domain.Place" resultType="long">
     SELECT id FROM place
     WHERE name = #{name}
       AND address = #{address}
@@ -87,7 +87,7 @@
 
   <!-- 单条 UPSERT：依赖唯一键 (source, external_ref) -->
   <insert id="upsert" useGeneratedKeys="true" keyProperty="id"
-          parameterType="thesis.project.gu.model.Place">
+          parameterType="thesis.project.gu.catalog.domain.Place">
     INSERT INTO place (name, address, city, district, country, latitude, longitude, source, external_ref, website_uri, google_maps_uri, business_status)
     VALUES (#{name}, #{address}, #{city}, #{district}, #{country},
     #{latitude}, #{longitude}, #{source}, #{externalRef}, #{websiteUri}, #{googleMapsUri}, #{businessStatus})

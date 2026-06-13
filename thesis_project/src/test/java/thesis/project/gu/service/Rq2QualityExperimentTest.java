@@ -3,10 +3,14 @@ package thesis.project.gu.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
-import thesis.project.gu.model.LocalPoiCatalog;
-import thesis.project.gu.model.LocalPoiItem;
-import thesis.project.gu.req.CreatePlanReq;
-import thesis.project.gu.response.PlanDraftResponse;
+import thesis.project.gu.catalog.local.LocalPoiCatalog;
+import thesis.project.gu.catalog.local.LocalPoiItem;
+import thesis.project.gu.catalog.local.LocalPoiCatalogService;
+import thesis.project.gu.planning.api.dto.CreatePlanReq;
+import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.planning.localfast.LocalPlanGeneratorService;
+import thesis.project.gu.planning.quality.LocalPlanQualityDiagnosticService;
+import thesis.project.gu.planning.quality.LocalPlanQualityReport;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

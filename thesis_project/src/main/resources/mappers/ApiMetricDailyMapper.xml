@@ -1,9 +1,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="thesis.project.gu.mapper.ApiMetricDailyMapper">
+<mapper namespace="thesis.project.gu.observability.persistence.ApiMetricDailyMapper">
 
-    <resultMap id="ApiMetricDailyMap" type="thesis.project.gu.model.ApiMetricDaily">
+    <resultMap id="ApiMetricDailyMap" type="thesis.project.gu.observability.domain.ApiMetricDaily">
         <result property="metricDate" column="metric_date"/>
         <result property="category" column="category"/>
         <result property="endpoint" column="endpoint"/>
@@ -21,7 +21,7 @@
         <result property="updatedAt" column="updated_at"/>
     </resultMap>
 
-    <insert id="upsertDailyMetric" parameterType="thesis.project.gu.model.ApiMetricDaily">
+    <insert id="upsertDailyMetric" parameterType="thesis.project.gu.observability.domain.ApiMetricDaily">
         INSERT INTO api_metric_daily (
             metric_date,
             category,

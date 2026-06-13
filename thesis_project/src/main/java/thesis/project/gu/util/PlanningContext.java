@@ -1,6 +1,6 @@
 package thesis.project.gu.util;
 
-import thesis.project.gu.req.CreatePlanReq;
+import thesis.project.gu.planning.api.dto.CreatePlanReq;
 
 import java.util.HashSet;
 import java.util.Locale;

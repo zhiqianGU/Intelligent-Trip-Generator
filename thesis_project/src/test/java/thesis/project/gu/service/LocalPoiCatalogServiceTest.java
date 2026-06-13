@@ -2,8 +2,9 @@ package thesis.project.gu.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import thesis.project.gu.model.LocalPoiCatalog;
-import thesis.project.gu.model.LocalPoiItem;
+import thesis.project.gu.catalog.local.LocalPoiCatalog;
+import thesis.project.gu.catalog.local.LocalPoiItem;
+import thesis.project.gu.catalog.local.LocalPoiCatalogService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

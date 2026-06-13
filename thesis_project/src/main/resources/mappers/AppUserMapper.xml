@@ -1,8 +1,8 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="thesis.project.gu.mapper.AppUserMapper">
+<mapper namespace="thesis.project.gu.user.persistence.AppUserMapper">
 
-    <resultMap id="userMap" type="thesis.project.gu.model.AppUser">
+    <resultMap id="userMap" type="thesis.project.gu.user.domain.AppUser">
         <id     column="id"           property="id"/>
         <result column="display_name" property="displayName"/>
         <result column="created_at"   property="createdAt"/>

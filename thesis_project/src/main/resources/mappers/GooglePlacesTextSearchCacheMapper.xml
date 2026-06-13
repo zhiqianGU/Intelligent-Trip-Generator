@@ -1,9 +1,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="thesis.project.gu.mapper.GooglePlacesTextSearchCacheMapper">
+<mapper namespace="thesis.project.gu.infrastructure.external.google.cache.GooglePlacesTextSearchCacheMapper">
 
-    <resultMap id="GooglePlacesTextSearchCacheMap" type="thesis.project.gu.model.GooglePlacesTextSearchCache">
+    <resultMap id="GooglePlacesTextSearchCacheMap" type="thesis.project.gu.infrastructure.external.google.cache.GooglePlacesTextSearchCache">
         <id property="cacheKey" column="cache_key"/>
         <result property="textQuery" column="text_query"/>
         <result property="city" column="city"/>
@@ -18,7 +18,7 @@
         WHERE cache_key = #{cacheKey}
     </select>
 
-    <insert id="upsert" parameterType="thesis.project.gu.model.GooglePlacesTextSearchCache">
+    <insert id="upsert" parameterType="thesis.project.gu.infrastructure.external.google.cache.GooglePlacesTextSearchCache">
         INSERT INTO google_places_text_search_cache (
             cache_key,
             text_query,

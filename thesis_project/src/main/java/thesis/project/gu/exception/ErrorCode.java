@@ -34,6 +34,18 @@ public enum ErrorCode {
         this.defaultMsg = defaultMsg;
     }
 
+    public String getCode() {
+        return code;
+    }
+
+    public HttpStatus getStatus() {
+        return status;
+    }
+
+    public String getDefaultMsg() {
+        return defaultMsg;
+    }
+
     public NavigatorException ex() {
         return new NavigatorException(this);
     }

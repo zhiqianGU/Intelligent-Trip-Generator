@@ -1,4 +1,4 @@
-package thesis.project.gu.service;
+package thesis.project.gu.planning.application;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,10 +8,22 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
-import thesis.project.gu.client.GooglePlacesClient;
-import thesis.project.gu.model.StopCoordinate;
-import thesis.project.gu.req.CreatePlanReq;
-import thesis.project.gu.response.PlanDraftResponse;
+import thesis.project.gu.catalog.heuristic.PlaceHeuristicService;
+import thesis.project.gu.catalog.verification.HotelVerificationService;
+import thesis.project.gu.catalog.verification.RestaurantVerificationService;
+import thesis.project.gu.infrastructure.external.google.GooglePlacesClient;
+import thesis.project.gu.infrastructure.cache.CacheSerive;
+import thesis.project.gu.routing.domain.StopCoordinate;
+import thesis.project.gu.planning.api.dto.CreatePlanReq;
+import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.planning.ai.TripAiService;
+import thesis.project.gu.planning.application.PlanProcessorService;
+import thesis.project.gu.planning.localfast.LocalPlanGeneratorService;
+import thesis.project.gu.planning.quality.LocalPlanQualityDiagnosticService;
+import thesis.project.gu.planning.quality.LocalPlanQualityReport;
+import thesis.project.gu.planning.quality.PlanQualityMetricsService;
+import thesis.project.gu.planning.scheduling.DaySkeletonService;
+import thesis.project.gu.routing.application.MapService;
 
 import java.lang.reflect.Method;
 import java.util.List;
@@ -445,17 +457,17 @@ class PlanProcessorServiceTest {
             CreatePlanReq realLongReq = new CreatePlanReq("Brisbane", 10, null, new CreatePlanReq.Party(2, 0), List.of(), "normal", "qwen-max", null);
             
             // 为了通过校验，响应必须包含 10 个 DayPlan 元素，且不能有跨天重复 POI
-            java.util.List<thesis.project.gu.response.PlanDraftResponse.DayPlan> tenDays = new java.util.ArrayList<>();
+            java.util.List<thesis.project.gu.planning.api.dto.PlanDraftResponse.DayPlan> tenDays = new java.util.ArrayList<>();
             for (int i = 1; i <= 10; i++) {
                 final int dayIdx = i;
-                java.util.List<thesis.project.gu.response.PlanDraftResponse.Place> uniqueStops = phased.daysPlan().get(0).stops().stream()
-                        .map(p -> new thesis.project.gu.response.PlanDraftResponse.Place(
+                java.util.List<thesis.project.gu.planning.api.dto.PlanDraftResponse.Place> uniqueStops = phased.daysPlan().get(0).stops().stream()
+                        .map(p -> new thesis.project.gu.planning.api.dto.PlanDraftResponse.Place(
                                 p.name() + " Day " + dayIdx, p.addressLine(), p.suburb(), p.city(), p.state(), p.postcode(), p.country(),
                                 p.category(), p.stayMinutes(), p.timeSlot(), p.startTime(), p.endTime(), p.mealType(),
                                 p.preferredArea(), p.cuisine(), p.vibe(), p.budgetLevel(), p.reason(), p.tip(),
                                 p.websiteUri(), p.googleMapsUri(), p.businessStatus(), p.url(), p.latitude(), p.longitude()
                         )).toList();
-                tenDays.add(new thesis.project.gu.response.PlanDraftResponse.DayPlan(i, phased.daysPlan().get(0).hotel(), uniqueStops, "Theme", "M", "A", "E", "N"));
+                tenDays.add(new thesis.project.gu.planning.api.dto.PlanDraftResponse.DayPlan(i, phased.daysPlan().get(0).hotel(), uniqueStops, "Theme", "M", "A", "E", "N"));
             }
             
             PlanDraftResponse longPhased = new PlanDraftResponse(phased.city(), phased.country(), 10, phased.currency(), phased.party(), phased.pace(), phased.title(), phased.overview(), tenDays, phased.copyPolishStatus());
