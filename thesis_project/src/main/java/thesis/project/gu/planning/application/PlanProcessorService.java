@@ -24,10 +24,7 @@ import thesis.project.gu.infrastructure.cache.CacheSerive;
 import thesis.project.gu.catalog.verification.HotelVerificationService;
 import thesis.project.gu.catalog.verification.RestaurantVerificationService;
 import thesis.project.gu.catalog.heuristic.PlaceHeuristicService;
-import thesis.project.gu.planning.localfast.LocalPlanGeneratorService;
 import thesis.project.gu.planning.metrics.PlanStageMetrics;
-import thesis.project.gu.planning.quality.LocalPlanQualityDiagnosticService;
-import thesis.project.gu.planning.quality.LocalPlanQualityReport;
 import thesis.project.gu.planning.quality.PlanQualityMetricsService;
 import thesis.project.gu.planning.quality.PlanQualityReport;
 import thesis.project.gu.planning.scheduling.DaySkeletonService;
@@ -123,9 +120,11 @@ public class PlanProcessorService {
     private final DaySkeletonService daySkeletonService;
     private final PlaceHeuristicService placeHeuristicService;
     private final StringRedisTemplate stringRedisTemplate;
-    private final LocalPlanGeneratorService localPlanGeneratorService;
-    private final LocalPlanQualityDiagnosticService localPlanQualityDiagnosticService;
-    private final PlanGenerationModeResolver planGenerationModeResolver;
+    private final PlanRequestContextBuilder planRequestContextBuilder;
+    private final AiDraftGenerationService aiDraftGenerationService;
+    private final GenerateInitialPlanUseCase generateInitialPlanUseCase;
+    private final PlanRepairPipelineService planRepairPipelineService;
+    private final PlanResponseAssembler planResponseAssembler;
     private final CopyPolishService copyPolishService;
 
     public PlanProcessorService(
@@ -140,9 +139,11 @@ public class PlanProcessorService {
             DaySkeletonService daySkeletonService,
             PlaceHeuristicService placeHeuristicService,
             StringRedisTemplate stringRedisTemplate,
-            LocalPlanGeneratorService localPlanGeneratorService,
-            LocalPlanQualityDiagnosticService localPlanQualityDiagnosticService,
-            PlanGenerationModeResolver planGenerationModeResolver,
+            PlanRequestContextBuilder planRequestContextBuilder,
+            AiDraftGenerationService aiDraftGenerationService,
+            GenerateInitialPlanUseCase generateInitialPlanUseCase,
+            PlanRepairPipelineService planRepairPipelineService,
+            PlanResponseAssembler planResponseAssembler,
             CopyPolishService copyPolishService
     ) {
         this.aiService = aiService;
@@ -156,14 +157,17 @@ public class PlanProcessorService {
         this.daySkeletonService = daySkeletonService;
         this.placeHeuristicService = placeHeuristicService;
         this.stringRedisTemplate = stringRedisTemplate;
-        this.localPlanGeneratorService = localPlanGeneratorService;
-        this.localPlanQualityDiagnosticService = localPlanQualityDiagnosticService;
-        this.planGenerationModeResolver = planGenerationModeResolver;
+        this.planRequestContextBuilder = planRequestContextBuilder;
+        this.aiDraftGenerationService = aiDraftGenerationService;
+        this.generateInitialPlanUseCase = generateInitialPlanUseCase;
+        this.planRepairPipelineService = planRepairPipelineService;
+        this.planResponseAssembler = planResponseAssembler;
         this.copyPolishService = copyPolishService;
     }
 
     PlanDraftResponse processExistingRawDraft(CreatePlanReq req, String raw, boolean redisHit, long aiGenerationMs) throws Exception {
-        return processDraftSinglePass(req, raw, redisHit, aiGenerationMs, false);
+        PlanRequestContextBuilder.PlanRequestContext context = planRequestContextBuilder.build(req, redisHit, false);
+        return processDraftSinglePass(context.request(), raw, context.redisHit(), aiGenerationMs, context.deferCopyPolish());
     }
 
     public PlanDraftResponse generateDraft(CreatePlanReq req, boolean redisHit) throws Exception {
@@ -171,39 +175,33 @@ public class PlanProcessorService {
     }
 
     public PlanDraftResponse generateDraft(CreatePlanReq req, boolean redisHit, boolean deferCopyPolish) throws Exception {
-        PlanGenerationModeResolver.GenerationMode mode = planGenerationModeResolver.resolve(req);
-        if (mode.localFast()) {
-            long startedAt = System.currentTimeMillis();
-            PlanDraftResponse draft = localPlanGeneratorService.generate(req);
-            if (deferCopyPolish) {
-                draft = withCopyPolishStatus(draft, "deferred");
+        return generateInitialPlanUseCase.execute(req, redisHit, deferCopyPolish, initialPlanOperations());
+    }
+
+    private GenerateInitialPlanUseCase.Operations initialPlanOperations() {
+        return new GenerateInitialPlanUseCase.Operations() {
+            @Override
+            PlanDraftResponse withCopyPolishStatus(PlanDraftResponse draft, String status) {
+                return PlanProcessorService.this.withCopyPolishStatus(draft, status);
             }
-            LocalPlanQualityReport qualityReport = localPlanQualityDiagnosticService.diagnose(draft);
-            if (!qualityReport.warnings().isEmpty()) {
-                log.warn("Local fast plan quality score={} errors={} warnings={} details={}",
-                        qualityReport.score(),
-                        qualityReport.errorCount(),
-                        qualityReport.warningCount(),
-                        qualityReport.warnings());
+
+            @Override
+            PlanDraftResponse processGeneratedRawDraft(
+                    CreatePlanReq req,
+                    String raw,
+                    boolean redisHit,
+                    long aiGenerationMs,
+                    boolean deferCopyPolish
+            ) throws Exception {
+                return PlanProcessorService.this.processDraftSinglePass(
+                        req,
+                        raw,
+                        redisHit,
+                        aiGenerationMs,
+                        deferCopyPolish
+                );
             }
-            log.info("Local fast plan generation completed city={} requestedDays={} actualDayPlans={} elapsedMs={}",
-                    req == null ? null : req.city(),
-                    req == null ? null : req.days(),
-                    draft == null || draft.daysPlan() == null ? null : draft.daysPlan().size(),
-                    System.currentTimeMillis() - startedAt);
-            return draft;
-        }
-        log.info("Plan generation start city={} requestedDays={} phasedGeneration={} redisHit={}",
-                req == null ? null : req.city(),
-                req == null ? null : req.days(),
-                mode.phasedGeneration(),
-                redisHit);
-        long aiStartedAt = System.currentTimeMillis();
-        String raw = mode.phasedGeneration()
-                ? aiService.generatePlanRawPhased(req)
-                : aiService.generatePlanRaw(req);
-        long aiGenerationMs = System.currentTimeMillis() - aiStartedAt;
-        return processDraftSinglePass(req, raw, redisHit, aiGenerationMs, deferCopyPolish);
+        };
     }
 
     private PlanDraftResponse processDraftSinglePass(
@@ -220,7 +218,7 @@ public class PlanProcessorService {
         appendStageTiming(timingSummary, "initial/ai-generate", aiGenerationMs);
 
         try {
-            ProcessAttemptResult initialAttempt = processAttemptWithJsonRecovery(
+            PlanRepairPipelineService.ProcessAttemptResult initialAttempt = processAttemptWithJsonRecovery(
                     req,
                     raw,
                     "initial",
@@ -241,7 +239,7 @@ public class PlanProcessorService {
     }
 
     private boolean isPhasedGenerationEnabled(CreatePlanReq req) {
-        return planGenerationModeResolver.isPhasedGenerationEnabled(req);
+        return planRequestContextBuilder.build(req, false, false).mode().phasedGeneration();
     }
 
     private PlanDraftResponse validateAndRetry(
@@ -251,7 +249,7 @@ public class PlanProcessorService {
             long totalStartedAt,
             StringBuilder stageSummary,
             StringBuilder timingSummary,
-            ProcessAttemptResult initialAttempt,
+            PlanRepairPipelineService.ProcessAttemptResult initialAttempt,
             List<PlanStageMetrics> qualityStages,
             boolean deferCopyPolish
     ) throws Exception {
@@ -277,16 +275,17 @@ public class PlanProcessorService {
                 req,
                 validationIssues,
                 MAX_PLAN_RETRY_ATTEMPTS,
-                shortRawPreview(raw),
+                aiDraftGenerationService.shortRawPreview(raw),
                 raw == null ? 0 : raw.length());
 
-        PlanDraftResponse localRescue = localRescueBeforeRetryIfValid(
+        PlanDraftResponse localRescue = planRepairPipelineService.localRescueBeforeRetryIfValid(
                 req,
                 draft,
                 validationIssues,
                 stageSummary,
                 timingSummary,
-                qualityStages
+                qualityStages,
+                repairOperations()
         );
         if (localRescue != null) {
             log.warn("Initial itinerary accepted with local rescue before AI retry. req={}, originalIssues={}",
@@ -307,14 +306,15 @@ public class PlanProcessorService {
         }
 
         if (isDuplicateDominatedDeterministicFailure(validationIssues)) {
-            DeterministicFallbackResult deterministicEarlyStop = deterministicRepairIfValid(
+            PlanRepairPipelineService.DeterministicFallbackResult deterministicEarlyStop = planRepairPipelineService.deterministicRepairIfValid(
                     req,
                     draft,
                     validationIssues,
                     "initial",
                     stageSummary,
                     timingSummary,
-                    qualityStages
+                    qualityStages,
+                    repairOperations()
             );
             if (deterministicEarlyStop != null && deterministicEarlyStop.accepted()) {
                 log.warn("Initial itinerary accepted with deterministic duplicate-first fallback. req={}, originalIssues={}",
@@ -344,7 +344,7 @@ public class PlanProcessorService {
         String retryRaw = regenerateRetryAttempt(req, draft, validationIssues, retrySkeletonContext);
         appendStageTiming(timingSummary, "retry-1/ai-regenerate", System.currentTimeMillis() - stageStartedAt);
 
-        ProcessAttemptResult retryAttempt = processAttemptWithJsonRecovery(
+        PlanRepairPipelineService.ProcessAttemptResult retryAttempt = processAttemptWithJsonRecovery(
                 req,
                 retryRaw,
                 "retry-1",
@@ -371,13 +371,14 @@ public class PlanProcessorService {
             );
         }
 
-        DeterministicFallbackResult deterministicFallback = deterministicRetryFallbackIfValid(
+        PlanRepairPipelineService.DeterministicFallbackResult deterministicFallback = planRepairPipelineService.deterministicRetryFallbackIfValid(
                 req,
                 retried,
                 retryValidationIssues,
                 stageSummary,
                 timingSummary,
-                qualityStages
+                qualityStages,
+                repairOperations()
         );
         if (deterministicFallback != null && deterministicFallback.accepted()) {
             log.warn("Retry itinerary accepted with deterministic fallback. req={}, originalIssues={}", req, retryValidationIssues);
@@ -395,7 +396,12 @@ public class PlanProcessorService {
             );
         }
 
-        PlanDraftResponse relaxedFallback = relaxedPaceFallbackIfValid(retried, req, retryValidationIssues);
+        PlanDraftResponse relaxedFallback = planRepairPipelineService.relaxedPaceFallbackIfValid(
+                retried,
+                req,
+                retryValidationIssues,
+                repairOperations()
+        );
         if (relaxedFallback != null) {
             log.warn("Retry itinerary accepted with relaxed pace fallback. req={}, originalIssues={}", req, retryValidationIssues);
             return finishSuccessfulAttempt(
@@ -421,7 +427,7 @@ public class PlanProcessorService {
                 : retryValidationIssues;
         log.error("Retried generated itinerary failed validation. issues={}, retryRawPreview={}, retryRawLength={}",
                 finalRetryIssues,
-                shortRawPreview(retryRaw),
+                aiDraftGenerationService.shortRawPreview(retryRaw),
                 retryRaw == null ? 0 : retryRaw.length());
         if (isRelaxedValidationBenchmarkEnabled() && !hasRequestedDayCountIssue(finalRetryIssues)) {
             log.warn("Accepting retried itinerary despite validation issues because {}=true. req={}, issues={}",
@@ -459,13 +465,13 @@ public class PlanProcessorService {
         if (shouldUseDayLevelPhasedRetry(req, validationIssues)) {
             PlanDraftResponse phasedRetried = retryFailedDaysPhased(req, draft, validationIssues, retrySkeletonContext);
             if (phasedRetried != null) {
-                return objectMapper.writeValueAsString(phasedRetried);
+                return aiDraftGenerationService.serializeDraft(phasedRetried);
             }
         }
         if (shouldUsePhasedWholePlanRetry(req, draft, validationIssues)) {
             PlanDraftResponse phasedRetried = retryWholePlanPhased(req, draft, validationIssues, retrySkeletonContext);
             if (phasedRetried != null) {
-                return objectMapper.writeValueAsString(phasedRetried);
+                return aiDraftGenerationService.serializeDraft(phasedRetried);
             }
         }
         return regenerateWholePlanRetry(req, draft, validationIssues, retrySkeletonContext);
@@ -492,7 +498,7 @@ public class PlanProcessorService {
             DaySkeletonContext retrySkeletonContext
     ) throws Exception {
         String compactSkeletonHints = compactRetrySkeletonHints(retrySkeletonContext, validationIssues);
-        return aiService.regeneratePlanRaw(
+        return aiDraftGenerationService.regenerateWholePlanRaw(
                 req,
                 retryInstruction(req, validationIssues, retrySkeletonContext, failedDraft),
                 compactSkeletonHints
@@ -546,7 +552,7 @@ public class PlanProcessorService {
                     retryInstructionForWholePlanDay(dayIndex, dayIssues, failedDraft, skeletonContext, nonDayIssueInstruction)
             );
         }
-        return aiService.regeneratePlanDaysPhased(req, failedDraft, targetDayIndexes, retryInstructionsByDay);
+        return aiDraftGenerationService.regeneratePlanDaysPhased(req, failedDraft, targetDayIndexes, retryInstructionsByDay);
     }
 
     private List<Integer> collectWholePlanPhasedRetryDayIndexes(
@@ -657,7 +663,7 @@ public class PlanProcessorService {
         return polished;
     }
 
-    private ProcessAttemptResult processAttempt(
+    private PlanRepairPipelineService.ProcessAttemptResult processAttempt(
             CreatePlanReq req,
             String raw,
             String attemptLabel,
@@ -665,36 +671,182 @@ public class PlanProcessorService {
             StringBuilder timingSummary,
             List<PlanStageMetrics> qualityStages
     ) throws Exception {
-        ParseNormalizeResult parsed = parseAndNormalize(raw, attemptLabel, stageSummary, timingSummary);
-        qualityStages.add(captureStageMetrics(attemptLabel + "/raw_parsed", parsed.draft(), req, null));
-        EntityVerificationResult verified = verifyAndRepairEntities(parsed.draft(), attemptLabel, stageSummary, timingSummary);
-        PlanDraftResponse draft = verified.draft();
-        List<String> validationIssues = verified.validationIssues();
-        qualityStages.add(captureStageMetrics(attemptLabel + "/entity_verified", draft, req, validationIssues));
-
-        draft = applySemanticPruning(draft, req, attemptLabel, stageSummary, timingSummary);
-
-        long stageStartedAt = System.currentTimeMillis();
-        draft = restaurantVerificationService.ensureRequiredMeals(draft);
-        draft = restaurantVerificationService.verifyAndNormalize(draft).draft();
-        appendStageTiming(timingSummary, attemptLabel + "/ensure-required-meals", System.currentTimeMillis() - stageStartedAt);
-
-        draft = applyThemeParkGovernance(draft, req, attemptLabel, stageSummary, timingSummary);
-
-        draft = applyRouteAwareScheduling(draft, attemptLabel, stageSummary, timingSummary);
-
-        draft = applyPostRouteRepair(draft, req, attemptLabel, stageSummary, timingSummary);
-        qualityStages.add(captureStageMetrics(attemptLabel + "/post_route_repaired", draft, req, validationIssues));
-
-        stageStartedAt = System.currentTimeMillis();
-        DaySkeletonContext skeletonContext = skeletonContext(req, draft);
-        validationIssues.addAll(validateDraft(draft, req, skeletonContext));
-        appendStageTiming(timingSummary, attemptLabel + "/validate", System.currentTimeMillis() - stageStartedAt);
-
-        return new ProcessAttemptResult(draft, validationIssues);
+        return planRepairPipelineService.processAttempt(
+                req,
+                raw,
+                attemptLabel,
+                stageSummary,
+                timingSummary,
+                qualityStages,
+                repairOperations()
+        );
     }
 
-    private ProcessAttemptResult processAttemptWithJsonRecovery(
+    private PlanRepairPipelineService.Operations repairOperations() {
+        return new PlanRepairPipelineService.Operations() {
+            @Override
+            PlanRepairPipelineService.ParseNormalizeResult parseAndNormalize(
+                    String raw,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary
+            ) throws Exception {
+                return PlanProcessorService.this.parseAndNormalize(raw, attemptLabel, stageSummary, timingSummary);
+            }
+
+            @Override
+            PlanRepairPipelineService.EntityVerificationResult verifyAndRepairEntities(
+                    PlanDraftResponse draft,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary
+            ) {
+                return PlanProcessorService.this.verifyAndRepairEntities(draft, attemptLabel, stageSummary, timingSummary);
+            }
+
+            @Override
+            PlanDraftResponse applySemanticPruning(
+                    PlanDraftResponse draft,
+                    CreatePlanReq req,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary
+            ) {
+                return PlanProcessorService.this.applySemanticPruning(draft, req, attemptLabel, stageSummary, timingSummary);
+            }
+
+            @Override
+            PlanDraftResponse applyThemeParkGovernance(
+                    PlanDraftResponse draft,
+                    CreatePlanReq req,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary
+            ) {
+                return PlanProcessorService.this.applyThemeParkGovernance(draft, req, attemptLabel, stageSummary, timingSummary);
+            }
+
+            @Override
+            PlanDraftResponse applyRouteAwareScheduling(
+                    PlanDraftResponse draft,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary
+            ) {
+                return PlanProcessorService.this.applyRouteAwareScheduling(draft, attemptLabel, stageSummary, timingSummary);
+            }
+
+            @Override
+            PlanDraftResponse applyPostRouteRepair(
+                    PlanDraftResponse draft,
+                    CreatePlanReq req,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary
+            ) {
+                return PlanProcessorService.this.applyPostRouteRepair(draft, req, attemptLabel, stageSummary, timingSummary);
+            }
+
+            @Override
+            List<String> validateRepairedDraft(
+                    PlanDraftResponse draft,
+                    CreatePlanReq req,
+                    String attemptLabel,
+                    StringBuilder timingSummary
+            ) {
+                long stageStartedAt = System.currentTimeMillis();
+                DaySkeletonContext skeletonContext = skeletonContext(req, draft);
+                List<String> validationIssues = validateDraft(draft, req, skeletonContext);
+                appendStageTiming(timingSummary, attemptLabel + "/validate", System.currentTimeMillis() - stageStartedAt);
+                return validationIssues;
+            }
+
+            @Override
+            PlanStageMetrics captureStageMetrics(
+                    String stage,
+                    PlanDraftResponse draft,
+                    CreatePlanReq req,
+                    List<String> issues
+            ) {
+                return PlanProcessorService.this.captureStageMetrics(stage, draft, req, issues);
+            }
+
+            @Override
+            void appendStageTiming(StringBuilder timingSummary, String stage, long elapsedMs) {
+                PlanProcessorService.this.appendStageTiming(timingSummary, stage, elapsedMs);
+            }
+
+            @Override
+            PlanDraftResponse localRescueBeforeRetryIfValid(
+                    CreatePlanReq req,
+                    PlanDraftResponse draft,
+                    List<String> validationIssues,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary,
+                    List<PlanStageMetrics> qualityStages
+            ) {
+                return PlanProcessorService.this.localRescueBeforeRetryIfValid(
+                        req,
+                        draft,
+                        validationIssues,
+                        stageSummary,
+                        timingSummary,
+                        qualityStages
+                );
+            }
+
+            @Override
+            PlanRepairPipelineService.DeterministicFallbackResult deterministicRepairIfValid(
+                    CreatePlanReq req,
+                    PlanDraftResponse draft,
+                    List<String> validationIssues,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary,
+                    List<PlanStageMetrics> qualityStages
+            ) {
+                return PlanProcessorService.this.deterministicRepairIfValid(
+                        req,
+                        draft,
+                        validationIssues,
+                        attemptLabel,
+                        stageSummary,
+                        timingSummary,
+                        qualityStages
+                );
+            }
+
+            @Override
+            PlanRepairPipelineService.DeterministicFallbackResult deterministicRetryFallbackIfValid(
+                    CreatePlanReq req,
+                    PlanDraftResponse draft,
+                    List<String> validationIssues,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary,
+                    List<PlanStageMetrics> qualityStages
+            ) {
+                return PlanProcessorService.this.deterministicRetryFallbackIfValid(
+                        req,
+                        draft,
+                        validationIssues,
+                        stageSummary,
+                        timingSummary,
+                        qualityStages
+                );
+            }
+
+            @Override
+            PlanDraftResponse relaxedPaceFallbackIfValid(
+                    PlanDraftResponse draft,
+                    CreatePlanReq req,
+                    List<String> validationIssues
+            ) {
+                return PlanProcessorService.this.relaxedPaceFallbackIfValid(draft, req, validationIssues);
+            }
+        };
+    }
+
+    private PlanRepairPipelineService.ProcessAttemptResult processAttemptWithJsonRecovery(
             CreatePlanReq req,
             String raw,
             String attemptLabel,
@@ -719,17 +871,14 @@ public class PlanProcessorService {
                         attempt + 1,
                         req,
                         parseFailure.getOriginalMessage(),
-                        shortRawPreview(currentRaw));
+                        aiDraftGenerationService.shortRawPreview(currentRaw));
                 long stageStartedAt = System.currentTimeMillis();
-                if (isPhasedGenerationEnabled(req)) {
-                    currentRaw = aiService.generatePlanRawPhased(req);
-                } else {
-                    currentRaw = aiService.regeneratePlanRaw(
-                            req,
-                            invalidJsonRetryInstruction(parseFailure),
-                            repairSkeletonContext.promptHintsText()
-                    );
-                }
+                currentRaw = aiDraftGenerationService.regenerateInvalidJsonRaw(
+                        req,
+                        isPhasedGenerationEnabled(req),
+                        parseFailure,
+                        repairSkeletonContext.promptHintsText()
+                );
                 appendStageTiming(
                         timingSummary,
                         attemptLabel + "/ai-regenerate-invalid-json-" + (attempt + 1),
@@ -842,20 +991,14 @@ public class PlanProcessorService {
         return draft;
     }
 
-    private ParseNormalizeResult parseAndNormalize(
+    private PlanRepairPipelineService.ParseNormalizeResult parseAndNormalize(
             String raw,
             String attemptLabel,
             StringBuilder stageSummary,
             StringBuilder timingSummary
     ) throws Exception {
-        if (raw == null) {
-            throw new IllegalArgumentException("AI raw response is null");
-        }
         long stageStartedAt = System.currentTimeMillis();
-        PlanDraftResponse draft = objectMapper.readValue(
-                raw.strip().replaceAll("^```[a-zA-Z]*\\s*", "").replaceAll("```\\s*$", ""),
-                PlanDraftResponse.class
-        );
+        PlanDraftResponse draft = aiDraftGenerationService.parseRawDraft(raw);
         appendStageTiming(timingSummary, attemptLabel + "/parse-json", System.currentTimeMillis() - stageStartedAt);
         logPlanStageCounts(stageSummary, attemptLabel, "raw", draft);
 
@@ -863,10 +1006,10 @@ public class PlanProcessorService {
         draft = normalizeDraftSchedule(draft);
         appendStageTiming(timingSummary, attemptLabel + "/normalize-schedule", System.currentTimeMillis() - stageStartedAt);
 
-        return new ParseNormalizeResult(draft);
+        return new PlanRepairPipelineService.ParseNormalizeResult(draft);
     }
 
-    private EntityVerificationResult verifyAndRepairEntities(
+    private PlanRepairPipelineService.EntityVerificationResult verifyAndRepairEntities(
             PlanDraftResponse draft,
             String attemptLabel,
             StringBuilder stageSummary,
@@ -884,7 +1027,7 @@ public class PlanProcessorService {
         appendStageTiming(timingSummary, attemptLabel + "/meal-verify-1", System.currentTimeMillis() - stageStartedAt);
         if (initialVerification.issues().isEmpty()) {
             logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
-            return new EntityVerificationResult(draft, validationIssues);
+            return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
         }
 
         stageStartedAt = System.currentTimeMillis();
@@ -895,7 +1038,7 @@ public class PlanProcessorService {
         if (!hasChangedMealTargets(initialChangedMealTargets)) {
             logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
             validationIssues.addAll(initialVerification.issues());
-            return new EntityVerificationResult(draft, validationIssues);
+            return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
         }
 
         stageStartedAt = System.currentTimeMillis();
@@ -904,7 +1047,7 @@ public class PlanProcessorService {
         appendStageTiming(timingSummary, attemptLabel + "/meal-verify-2", System.currentTimeMillis() - stageStartedAt);
         if (finalVerification.issues().isEmpty()) {
             logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
-            return new EntityVerificationResult(draft, validationIssues);
+            return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
         }
 
         stageStartedAt = System.currentTimeMillis();
@@ -915,7 +1058,7 @@ public class PlanProcessorService {
         if (!hasChangedMealTargets(finalChangedMealTargets)) {
             logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
             validationIssues.addAll(finalVerification.issues());
-            return new EntityVerificationResult(draft, validationIssues);
+            return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
         }
 
         stageStartedAt = System.currentTimeMillis();
@@ -925,7 +1068,7 @@ public class PlanProcessorService {
         logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
 
         validationIssues.addAll(settledVerification.issues());
-        return new EntityVerificationResult(draft, validationIssues);
+        return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
     }
 
     private boolean hasChangedMealTargets(Map<Integer, java.util.Set<Integer>> changedTargets) {
@@ -935,29 +1078,13 @@ public class PlanProcessorService {
         return changedTargets.values().stream().anyMatch(indexes -> indexes != null && !indexes.isEmpty());
     }
 
-    private record ProcessAttemptResult(PlanDraftResponse draft, List<String> validationIssues) {
-    }
-
-    private record ParseNormalizeResult(PlanDraftResponse draft) {
-    }
-
-    private record EntityVerificationResult(PlanDraftResponse draft, List<String> validationIssues) {
-    }
-
-    private record DeterministicFallbackResult(
-            PlanDraftResponse draft,
-            List<String> validationIssues,
-            boolean accepted
-    ) {
-    }
-
     private PlanDraftResponse normalizeDraftSchedule(PlanDraftResponse draft) {
         if (draft == null || draft.daysPlan() == null) return draft;
         List<DayPlan> days = new ArrayList<>();
         for (DayPlan day : draft.daysPlan()) {
             days.add(normalizeDaySchedule(day));
         }
-        return new PlanDraftResponse(draft.city(), draft.country(), draft.days(), draft.currency(), draft.party(), draft.pace(), draft.title(), draft.overview(), days, draft.copyPolishStatus());
+        return planResponseAssembler.withDays(draft, days);
     }
 
     private DayPlan normalizeDaySchedule(DayPlan day) {
@@ -983,7 +1110,7 @@ public class PlanProcessorService {
         if (draft == null || draft.daysPlan() == null) return draft;
         RouteRecommendationContext ctx = routeSchedulingContext(draft);
         List<DayPlan> days = normalizeDaysScheduleWithRouteDurations(draft.daysPlan(), ctx, null);
-        return new PlanDraftResponse(draft.city(), draft.country(), draft.days(), draft.currency(), draft.party(), draft.pace(), draft.title(), draft.overview(), days, draft.copyPolishStatus());
+        return planResponseAssembler.withDays(draft, days);
     }
 
     public PlanDraftResponse normalizeDraftScheduleWithRouteDurations(PlanDraftResponse draft, java.util.Set<Integer> targetDayIndexes) {
@@ -992,7 +1119,7 @@ public class PlanProcessorService {
         }
         RouteRecommendationContext ctx = routeSchedulingContext(draft);
         List<DayPlan> days = normalizeDaysScheduleWithRouteDurations(draft.daysPlan(), ctx, targetDayIndexes);
-        return new PlanDraftResponse(draft.city(), draft.country(), draft.days(), draft.currency(), draft.party(), draft.pace(), draft.title(), draft.overview(), days, draft.copyPolishStatus());
+        return planResponseAssembler.withDays(draft, days);
     }
 
     private RouteRecommendationContext routeSchedulingContext(PlanDraftResponse draft) {
@@ -1087,7 +1214,7 @@ public class PlanProcessorService {
             }
             updatedDays.add(new DayPlan(day.dayIndex(), day.hotel(), updatedStops, day.theme(), day.morningNote(), day.afternoonNote(), day.eveningNote(), day.note()));
         }
-        return new PlanDraftResponse(draft.city(), draft.country(), draft.days(), draft.currency(), draft.party(), draft.pace(), draft.title(), draft.overview(), updatedDays, draft.copyPolishStatus());
+        return planResponseAssembler.withDays(draft, updatedDays);
     }
 
     private Map<Integer, java.util.Set<Integer>> detectChangedFoodStopIndexes(PlanDraftResponse before, PlanDraftResponse after) {
@@ -1809,7 +1936,7 @@ public class PlanProcessorService {
         if (retryInstructionsByDay.isEmpty()) {
             return null;
         }
-        return aiService.regeneratePlanDaysPhased(req, failedDraft, targetDayIndexes, retryInstructionsByDay);
+        return aiDraftGenerationService.regeneratePlanDaysPhased(req, failedDraft, targetDayIndexes, retryInstructionsByDay);
     }
 
     private List<Integer> collectScopedRetryDayIndexesWithDuplicateAnchors(
@@ -2413,30 +2540,10 @@ public class PlanProcessorService {
         if (!onlyTooFewNonMealStops) {
             return null;
         }
-        PlanDraftResponse relaxedDraft = withPace(draft, "relaxed");
-        CreatePlanReq relaxedReq = req == null
-                ? null
-                : new CreatePlanReq(req.city(), req.days(), req.budget(), req.party(), req.style(), "relaxed", req.mainModel(), req.departureDate());
+        PlanDraftResponse relaxedDraft = planResponseAssembler.withPace(draft, "relaxed");
+        CreatePlanReq relaxedReq = planResponseAssembler.withPace(req, "relaxed");
         List<String> relaxedIssues = validateDraft(relaxedDraft, relaxedReq);
         return relaxedIssues.isEmpty() ? relaxedDraft : null;
-    }
-
-    private PlanDraftResponse withPace(PlanDraftResponse draft, String pace) {
-        if (draft == null) {
-            return null;
-        }
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                pace,
-                draft.title(),
-                draft.overview(),
-                draft.daysPlan(),
-                draft.copyPolishStatus()
-        );
     }
 
     private int maxAllowedGapMinutes(Place previous, Place current, boolean finalStopOfDay) {
@@ -2598,28 +2705,6 @@ public class PlanProcessorService {
 
     private PlanDraftResponse withCopyPolishStatus(PlanDraftResponse draft, String status) {
         return copyPolishService.withCopyPolishStatus(draft, status);
-    }
-
-    private String invalidJsonRetryInstruction(JsonProcessingException parseFailure) {
-        String reason = parseFailure == null || parseFailure.getOriginalMessage() == null
-                ? "malformed json"
-                : parseFailure.getOriginalMessage();
-        return "The previous response was invalid JSON and could not be parsed (" + reason + "). "
-                + "Return the full itinerary again as one complete valid JSON object only. "
-                + "Do not truncate output. Close every quote, bracket, and brace. "
-                + "Ensure every string field is properly escaped, especially addressLine, reason, tip, theme, and note. "
-                + "Do not include markdown fences or commentary.";
-    }
-
-    private String shortRawPreview(String raw) {
-        if (raw == null) {
-            return "";
-        }
-        String compact = raw.replaceAll("\\s+", " ").trim();
-        if (compact.length() <= 240) {
-            return compact;
-        }
-        return compact.substring(0, 237) + "...";
     }
 
     private String normalizeNameForNarrativeMatch(String value) {
@@ -2806,18 +2891,7 @@ public class PlanProcessorService {
             ));
         }
 
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
+        return planResponseAssembler.withDays(draft, updatedDays);
     }
 
     private boolean isNonMealOccupyingMealSlot(Place stop) {
@@ -3150,18 +3224,7 @@ public class PlanProcessorService {
             return draft;
         }
 
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
+        return planResponseAssembler.withDays(draft, updatedDays);
     }
 
     private boolean shouldDropUnselectedShoppingStop(Place stop) {
@@ -3266,7 +3329,7 @@ public class PlanProcessorService {
         if (!changed) {
             return draft;
         }
-        return new PlanDraftResponse(draft.city(), draft.country(), draft.days(), draft.currency(), draft.party(), draft.pace(), draft.title(), draft.overview(), updatedDays, draft.copyPolishStatus());
+        return planResponseAssembler.withDays(draft, updatedDays);
     }
 
     private GooglePlacesClient.PlaceCandidate resolveThemeParkWithPlaces(Place stop) {
@@ -3720,18 +3783,7 @@ public class PlanProcessorService {
         if (!changed) {
             return draft;
         }
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
+        return planResponseAssembler.withDays(draft, updatedDays);
     }
 
     private boolean isOutOfRangeThemeParkStop(StopCoordinate cityCenter, Place stop) {
@@ -3807,18 +3859,7 @@ public class PlanProcessorService {
         if (!changed) {
             return draft;
         }
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
+        return planResponseAssembler.withDays(draft, updatedDays);
     }
 
     public PlanDraftResponse expandThemeParkDiningBreaks(PlanDraftResponse draft) {
@@ -3863,18 +3904,7 @@ public class PlanProcessorService {
         if (!changed) {
             return draft;
         }
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
+        return planResponseAssembler.withDays(draft, updatedDays);
     }
 
     private boolean isThemeParkLikeStop(Place stop) {
@@ -4625,7 +4655,7 @@ public class PlanProcessorService {
         } finally {
             executor.shutdownNow();
         }
-        return new PlanDraftResponse(draft.city(), draft.country(), draft.days(), draft.currency(), draft.party(), draft.pace(), draft.title(), draft.overview(), days, draft.copyPolishStatus());
+        return planResponseAssembler.withDays(draft, days);
     }
 
     private Place withResolvedCoordinate(Place stop) {
@@ -5369,7 +5399,7 @@ public class PlanProcessorService {
         }
     }
 
-    private DeterministicFallbackResult deterministicRetryFallbackIfValid(
+    private PlanRepairPipelineService.DeterministicFallbackResult deterministicRetryFallbackIfValid(
             CreatePlanReq req,
             PlanDraftResponse retried,
             List<String> retryValidationIssues,
@@ -5388,7 +5418,7 @@ public class PlanProcessorService {
         );
     }
 
-    private DeterministicFallbackResult deterministicRepairIfValid(
+    private PlanRepairPipelineService.DeterministicFallbackResult deterministicRepairIfValid(
             CreatePlanReq req,
             PlanDraftResponse draft,
             List<String> validationIssues,
@@ -5413,7 +5443,7 @@ public class PlanProcessorService {
                     repairedIssues);
         }
         qualityStages.add(captureStageMetrics(attemptLabel + "/deterministic_fallback", repaired, req, repairedIssues));
-        return new DeterministicFallbackResult(repaired, repairedIssues, repairedIssues.isEmpty());
+        return new PlanRepairPipelineService.DeterministicFallbackResult(repaired, repairedIssues, repairedIssues.isEmpty());
     }
 
     private boolean isDeterministicRepairIssue(String issue) {
@@ -5857,19 +5887,7 @@ public class PlanProcessorService {
         if (!changed) {
             return draft;
         }
-        PlanDraftResponse repaired = new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
-        return repaired;
+        return planResponseAssembler.withDays(draft, updatedDays);
     }
 
     private Place resolveCrossDayDuplicateReplacementStop(
@@ -6366,7 +6384,7 @@ public class PlanProcessorService {
     public PlanDraftResponse clampOversizedGaps(PlanDraftResponse draft) {
         if (draft == null || draft.daysPlan() == null) return draft;
         List<DayPlan> days = draft.daysPlan().stream().map(this::clampDayGaps).toList();
-        return new PlanDraftResponse(draft.city(), draft.country(), draft.days(), draft.currency(), draft.party(), draft.pace(), draft.title(), draft.overview(), days, draft.copyPolishStatus());
+        return planResponseAssembler.withDays(draft, days);
     }
 
     private PlanDraftResponse bridgeSmallDeterministicGapOverruns(PlanDraftResponse draft) {
@@ -6385,18 +6403,7 @@ public class PlanProcessorService {
         if (!changed) {
             return draft;
         }
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                days,
-                draft.copyPolishStatus()
-        );
+        return planResponseAssembler.withDays(draft, days);
     }
 
     private DayPlan bridgeSmallDeterministicGapOverruns(DayPlan day) {
@@ -6592,7 +6599,7 @@ public class PlanProcessorService {
             String note = themeParkDay ? sanitizeThemeParkCopy(day.note()) : day.note();
             return new DayPlan(day.dayIndex(), day.hotel(), stops, day.theme(), morningNote, afternoonNote, eveningNote, note);
         }).toList();
-        return new PlanDraftResponse(draft.city(), draft.country(), draft.days(), draft.currency(), draft.party(), draft.pace(), draft.title(), draft.overview(), days, draft.copyPolishStatus());
+        return planResponseAssembler.withDays(draft, days);
     }
 
     private Place normalizeNarrative(Place stop) {
