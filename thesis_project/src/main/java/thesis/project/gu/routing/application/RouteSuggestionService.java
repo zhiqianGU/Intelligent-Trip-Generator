@@ -1,45 +1,19 @@
-package thesis.project.gu.planning.api;
+package thesis.project.gu.routing.application;
 
-import com.alibaba.dashscope.exception.InputRequiredException;
-import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.cache.Cache;
-import org.springframework.cache.CacheManager;
-import org.springframework.http.MediaType;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
-import thesis.project.gu.infrastructure.external.google.GooglePlacesClient;
-import thesis.project.gu.weather.infrastructure.WeatherApiClient;
-import thesis.project.gu.exception.ErrorCode;
-import thesis.project.gu.exception.NavigatorException;
-import thesis.project.gu.planhistory.domain.TripPlanSummary;
-import thesis.project.gu.routing.domain.StopCoordinate;
-import thesis.project.gu.routing.domain.RouteRecommendationContext;
-import thesis.project.gu.routing.domain.RouteChoice;
-import thesis.project.gu.routing.domain.ModeSummary;
-import thesis.project.gu.routing.domain.RouteSegmentSuggestion;
-import thesis.project.gu.planning.api.dto.CreatePlanReq;
-import thesis.project.gu.routing.infrastructure.dto.GeoResponse;
-import thesis.project.gu.planning.api.dto.PlanDraftResponse;
-import thesis.project.gu.routing.application.MapService;
-import thesis.project.gu.routing.prewarm.PlanPrewarmService;
-import thesis.project.gu.planning.application.PlanProcessorService;
-import thesis.project.gu.planhistory.application.PlanService;
+import org.springframework.stereotype.Service;
 import thesis.project.gu.catalog.heuristic.PlaceHeuristicService;
-import thesis.project.gu.observability.application.RuntimeMetricsService;
-import thesis.project.gu.planning.ai.TripAiService;
+import thesis.project.gu.infrastructure.external.google.GooglePlacesClient;
+import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.routing.domain.ModeSummary;
+import thesis.project.gu.routing.domain.RouteChoice;
+import thesis.project.gu.routing.domain.RouteDaySuggestion;
+import thesis.project.gu.routing.domain.RouteRecommendationContext;
+import thesis.project.gu.routing.domain.RouteSegmentSuggestion;
+import thesis.project.gu.routing.domain.StopCoordinate;
+import thesis.project.gu.routing.infrastructure.dto.GeoResponse;
+import thesis.project.gu.weather.infrastructure.WeatherApiClient;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -49,28 +23,19 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Stream;
 
-@RestController
-@RequestMapping("/api/v1/plans")
-public class PlanController {
-    private final PlanService planService;
-    private final TripAiService aiService;
-    private final CacheManager cacheManager;
-    private final RuntimeMetricsService runtimeMetricsService;
-    private final PlanPrewarmService planPrewarmService;
+@Service
+public class RouteSuggestionService {
     private final MapService mapService;
     private final WeatherApiClient weatherApiClient;
     private final GooglePlacesClient googlePlacesClient;
-    private final PlanProcessorService planProcessorService;
     private final PlaceHeuristicService placeHeuristicService;
     private final ExecutorService routeExecutor;
     private final com.github.benmanes.caffeine.cache.Cache<String, RouteDaySuggestion> routeSuggestionDayCache = Caffeine.newBuilder()
@@ -78,72 +43,33 @@ public class PlanController {
             .expireAfterWrite(Duration.ofMinutes(30))
             .build();
 
-    public PlanController(
-            PlanService planService,
-            TripAiService aiService,
-            CacheManager cacheManager,
-            RuntimeMetricsService runtimeMetricsService,
-            PlanPrewarmService planPrewarmService,
+    public RouteSuggestionService(
             MapService mapService,
             WeatherApiClient weatherApiClient,
             GooglePlacesClient googlePlacesClient,
-            PlanProcessorService planProcessorService,
             PlaceHeuristicService placeHeuristicService,
             @Qualifier("routeExecutor") ExecutorService routeExecutor
     ) {
-        this.planService = planService;
-        this.aiService = aiService;
-        this.cacheManager = cacheManager;
-        this.runtimeMetricsService = runtimeMetricsService;
-        this.planPrewarmService = planPrewarmService;
         this.mapService = mapService;
         this.weatherApiClient = weatherApiClient;
         this.googlePlacesClient = googlePlacesClient;
-        this.planProcessorService = planProcessorService;
         this.placeHeuristicService = placeHeuristicService;
         this.routeExecutor = routeExecutor;
     }
 
-    @PostMapping(value = "/draft", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public PlanDraftResponse draft(
-            @RequestBody @Valid CreatePlanReq req,
-            @RequestHeader(name = "X-Defer-Copy-Polish", required = false) Boolean deferCopyPolish
-    )
-            throws Exception {
-        long startedAt = System.currentTimeMillis();
-        boolean redisHit = isAiPlanCacheHit(req);
-        try {
-            PlanDraftResponse result = planProcessorService.generateDraft(req, redisHit, Boolean.TRUE.equals(deferCopyPolish));
-            runtimeMetricsService.recordPlanGenerateRequest("draft", redisHit, System.currentTimeMillis() - startedAt, true);
-            return result;
-        } catch (NoApiKeyException | InputRequiredException | JsonProcessingException e) {
-            runtimeMetricsService.recordPlanGenerateRequest("draft", redisHit, System.currentTimeMillis() - startedAt, false);
-            throw e;
-        } catch (RuntimeException e) {
-            runtimeMetricsService.recordPlanGenerateRequest("draft", redisHit, System.currentTimeMillis() - startedAt, false);
-            throw e;
-        }
-    }
-
-    @PostMapping(value = "/route-suggestions/day", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public RouteDaySuggestion routeSuggestionDay(@RequestBody RouteSuggestionDayRequest request) {
-        PlanDraftResponse draft = request == null ? null : request.draft();
-        Integer requestedDayIndex = request == null ? null : request.dayIndex();
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty() || requestedDayIndex == null) {
-            return new RouteDaySuggestion(requestedDayIndex == null ? 0 : requestedDayIndex, List.of());
+    public RouteDaySuggestion buildRouteSuggestionDay(PlanDraftResponse draft, Integer dayIndex, String departureDate) {
+        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty() || dayIndex == null) {
+            return new RouteDaySuggestion(dayIndex == null ? 0 : dayIndex, List.of());
         }
         PlanDraftResponse.DayPlan day = draft.daysPlan().stream()
-                .filter(candidate -> candidate != null && candidate.dayIndex() == requestedDayIndex)
+                .filter(candidate -> candidate != null && candidate.dayIndex() == dayIndex)
                 .findFirst()
                 .orElse(null);
         if (day == null) {
-            return new RouteDaySuggestion(requestedDayIndex, List.of());
+            return new RouteDaySuggestion(dayIndex, List.of());
         }
-        RouteRecommendationContext recommendationContext = routeRecommendationContext(
-                draft,
-                request == null ? null : request.departureDate()
-        );
-        return cachedRouteSuggestionForDay(draft, day, recommendationContext, request.departureDate());
+        RouteRecommendationContext recommendationContext = routeRecommendationContext(draft, departureDate);
+        return cachedRouteSuggestionForDay(draft, day, recommendationContext, departureDate);
     }
 
     private RouteDaySuggestion cachedRouteSuggestionForDay(
@@ -221,54 +147,6 @@ public class PlanController {
         } catch (NoSuchAlgorithmException e) {
             return Integer.toHexString(value.hashCode());
         }
-    }
-
-    @PostMapping(value = "/weather", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public WeatherForecastResponse weatherForecast(@RequestBody WeatherForecastRequest request) {
-        if (request == null || request.city() == null || request.city().isBlank()
-                || request.departureDate() == null || request.departureDate().isBlank()
-                || request.days() == null || request.days() < 1) {
-            return new WeatherForecastResponse(false, List.of());
-        }
-        LocalDate departureDate = parseDate(request.departureDate());
-        if (departureDate == null) {
-            return new WeatherForecastResponse(false, List.of());
-        }
-        WeatherApiClient.Forecast forecast = weatherApiClient.forecast(request.city(), request.departureDate(), request.days());
-
-        List<WeatherDaySummary> days = new ArrayList<>();
-        for (int i = 0; i < request.days(); i++) {
-            LocalDate date = departureDate.plusDays(i);
-            WeatherApiClient.WeatherDay weatherDay = forecast == null || forecast.isEmpty() ? null : forecast.days().get(date.toString());
-            if (weatherDay == null) {
-                days.add(defaultSunnyWeatherDay(i + 1, date));
-                continue;
-            }
-            days.add(new WeatherDaySummary(
-                    i + 1,
-                    date.toString(),
-                    weatherDay.condition(),
-                    weatherDay.dailyChanceOfRain(),
-                    weatherDay.avgTempC(),
-                    weatherDay.maxTempC(),
-                    weatherDay.minTempC(),
-                    forecast.rainyAt(date, null)
-            ));
-        }
-        return new WeatherForecastResponse(true, days);
-    }
-
-    private WeatherDaySummary defaultSunnyWeatherDay(int dayIndex, LocalDate date) {
-        return new WeatherDaySummary(
-                dayIndex,
-                date == null ? "" : date.toString(),
-                "Sunny",
-                0,
-                null,
-                null,
-                null,
-                false
-        );
     }
 
     private RouteRecommendationContext routeRecommendationContext(PlanDraftResponse draft, String departureDateRaw) {
@@ -480,10 +358,6 @@ public class PlanController {
         return emptyRouteSegment(stops, index, index - 1, "Route suggestion unavailable");
     }
 
-    private RouteSegmentSuggestion emptyRouteSegment(List<PlanDraftResponse.Place> stops, int index, String hint) {
-        return emptyRouteSegment(stops, index, index - 1, hint);
-    }
-
     private RouteSegmentSuggestion emptyRouteSegment(List<PlanDraftResponse.Place> stops, int index, int segmentIndex, String hint) {
         return new RouteSegmentSuggestion(
                 segmentIndex,
@@ -631,208 +505,6 @@ public class PlanController {
         }
 
         return walk;
-    }
-
-    @PostMapping("/raw")
-    public Map<String, Object> generateRaw(
-            @RequestBody @Valid CreatePlanReq req,
-            @RequestHeader(name = "X-Defer-Copy-Polish", required = false) Boolean deferCopyPolish,
-            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
-    ) throws Exception {
-        long startedAt = System.currentTimeMillis();
-        boolean redisHit = isAiPlanCacheHit(req);
-        try {
-            PlanDraftResponse draft = planProcessorService.generateDraft(req, redisHit, Boolean.TRUE.equals(deferCopyPolish));
-
-            String preview;
-            try {
-                preview = aiService.render(draft, req.budget());
-            } catch (Exception e) {
-                preview = "(Tip) Preview rendering failed, but the structured draft was parsed successfully.";
-            }
-
-            Long aiRawId = 666666L;
-            Long planId = null;
-            if (userId != null) {
-                planId = aiService.saveDraftPlan(userId, draft, req.budget(), null, req.style(), req.pace(), req.departureDate());
-                if (planId != null) {
-                    planPrewarmService.prewarmPlanAsync(planId, draft.city());
-                }
-            }
-
-            runtimeMetricsService.recordPlanGenerateRequest("raw", redisHit, System.currentTimeMillis() - startedAt, true);
-            Map<String, Object> response = new java.util.LinkedHashMap<>();
-            response.put("aiRawId", aiRawId);
-            response.put("planId", planId);
-            response.put("draft", draft);
-            response.put("preview", preview);
-            return response;
-        } catch (Exception e) {
-            runtimeMetricsService.recordPlanGenerateRequest("raw", redisHit, System.currentTimeMillis() - startedAt, false);
-            throw e;
-        }
-    }
-
-    @PostMapping(value = "/copy-polish", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
-    public PlanDraftResponse copyPolish(
-            @RequestBody CopyPolishRequest request,
-            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
-    ) {
-        PlanDraftResponse draft = request == null ? null : request.draft();
-        if (draft == null) {
-            return null;
-        }
-        PlanDraftResponse polished = planProcessorService.applyCopyPolishPatch(draft);
-        Long planId = request == null ? null : request.planId();
-        if (userId != null && planId != null && planId > 0 && polished != null) {
-            planService.updatePlanCopy(userId, planId, polished);
-        }
-        return polished;
-    }
-
-    @PatchMapping("/{planId}/favorite")
-    public Map<String, Object> updateFavorite(
-            @PathVariable long planId,
-            @RequestParam boolean value,
-            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
-    ) {
-        if (userId == null) {
-            throw new NavigatorException(ErrorCode.UNAUTHORIZED, "Login required");
-        }
-
-        planService.setFavorite(userId, planId, value);
-        return Map.of("planId", planId, "favorite", value, "status", "ok");
-    }
-
-    @GetMapping("/me")
-    public PlanService.Paged<TripPlanSummary> myPlans(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) Boolean favorite,
-            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
-    ) {
-        long startedAt = System.currentTimeMillis();
-        try {
-            if (userId == null) throw ErrorCode.UNAUTHORIZED.ex("Login required");
-            PlanService.Paged<TripPlanSummary> result = planService.listMyPlans(userId, page, size, favorite);
-            runtimeMetricsService.recordPlanViewRequest("list", System.currentTimeMillis() - startedAt, true);
-            return result;
-        } catch (RuntimeException e) {
-            runtimeMetricsService.recordPlanViewRequest("list", System.currentTimeMillis() - startedAt, false);
-            throw e;
-        }
-    }
-
-    @GetMapping("/me/favorites")
-    public PlanService.Paged<TripPlanSummary> myFavorites(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
-    ) {
-        long startedAt = System.currentTimeMillis();
-        try {
-            if (userId == null) throw ErrorCode.UNAUTHORIZED.ex("Login required");
-            PlanService.Paged<TripPlanSummary> result = planService.listMyPlans(userId, page, size, true);
-            runtimeMetricsService.recordPlanViewRequest("favorites", System.currentTimeMillis() - startedAt, true);
-            return result;
-        } catch (RuntimeException e) {
-            runtimeMetricsService.recordPlanViewRequest("favorites", System.currentTimeMillis() - startedAt, false);
-            throw e;
-        }
-    }
-
-    @GetMapping("/{planId}")
-    public PlanService.PlanDetail myPlanDetail(
-            @PathVariable long planId,
-            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
-    ) {
-        long startedAt = System.currentTimeMillis();
-        try {
-            if (userId == null) throw ErrorCode.UNAUTHORIZED.ex("Login required");
-            PlanService.PlanDetail result = planService.getMyPlanDetail(userId, planId);
-            runtimeMetricsService.recordPlanViewRequest("detail", System.currentTimeMillis() - startedAt, true);
-            return result;
-        } catch (RuntimeException e) {
-            runtimeMetricsService.recordPlanViewRequest("detail", System.currentTimeMillis() - startedAt, false);
-            throw e;
-        }
-    }
-
-    @PatchMapping("/{planId}/title")
-    public Map<String, Object> renamePlan(
-            @PathVariable long planId,
-            @RequestParam(required = false) String title,
-            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
-    ) {
-        if (userId == null) throw ErrorCode.UNAUTHORIZED.ex("Login required");
-        planService.renamePlan(userId, planId, title);
-        return Map.of("planId", planId, "title", title, "status", "ok");
-    }
-
-    @DeleteMapping("/{planId}")
-    public Map<String, Object> deletePlan(
-            @PathVariable long planId,
-            @AuthenticationPrincipal(errorOnInvalidType = false) Long userId
-    ) {
-        if (userId == null) throw ErrorCode.UNAUTHORIZED.ex("Login required");
-        planService.deletePlan(userId, planId);
-        return Map.of("planId", planId, "status", "deleted");
-    }
-
-    private boolean isAiPlanCacheHit(CreatePlanReq req) {
-        Cache cache = cacheManager.getCache("ai_plan_raw");
-        if (cache == null) return false;
-        String key = planService.buildAiPlanCacheKey(req);
-        return cache.get(key) != null;
-    }
-
-    private String nullToEmpty(String value) {
-        return value == null ? "" : value;
-    }
-
-    private String roundCoordinate(Double value) {
-        if (value == null) {
-            return "";
-        }
-        return String.format(Locale.ROOT, "%.5f", value);
-    }
-
-    private boolean shouldRefreshCoordinate(PlanDraftResponse.Place stop) {
-        if (stop == null) {
-            return false;
-        }
-        if (isStrictMealStop(stop) || "hotel".equals(normalizeSlot(stop.category()))) {
-            return false;
-        }
-        if (isThemeParkLikeStop(stop)) {
-            return true;
-        }
-        return placeHeuristicService.isNavigationAnchorCandidate(stop.name())
-                || placeHeuristicService.isParkStopForCoordinateRefresh(stop)
-                || isStrongPoiCandidate(stop);
-    }
-
-    private String safeStopName(PlanDraftResponse.Place stop) {
-        if (stop == null || stop.name() == null) {
-            return null;
-        }
-        return stop.name().trim();
-    }
-
-    private String displayArea(PlanDraftResponse.Place stop) {
-        if (stop == null) {
-            return "the area";
-        }
-        if (stop.suburb() != null && !stop.suburb().isBlank()) {
-            return stop.suburb().trim();
-        }
-        if (stop.preferredArea() != null && !stop.preferredArea().isBlank()) {
-            return stop.preferredArea().trim();
-        }
-        if (stop.city() != null && !stop.city().isBlank()) {
-            return stop.city().trim();
-        }
-        return "the area";
     }
 
     public List<StopCoordinate> resolveStopCoordinatesInParallel(List<PlanDraftResponse.Place> stops) {
@@ -1137,6 +809,39 @@ public class PlanController {
                 || name.contains("monument");
     }
 
+    private boolean shouldRefreshCoordinate(PlanDraftResponse.Place stop) {
+        if (stop == null) {
+            return false;
+        }
+        if (isStrictMealStop(stop) || "hotel".equals(normalizeSlot(stop.category()))) {
+            return false;
+        }
+        if (isThemeParkLikeStop(stop)) {
+            return true;
+        }
+        return placeHeuristicService.isNavigationAnchorCandidate(stop.name())
+                || placeHeuristicService.isParkStopForCoordinateRefresh(stop)
+                || isStrongPoiCandidate(stop);
+    }
+
+    private String safeStopName(PlanDraftResponse.Place stop) {
+        if (stop == null || stop.name() == null) {
+            return null;
+        }
+        return stop.name().trim();
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String roundCoordinate(Double value) {
+        if (value == null) {
+            return "";
+        }
+        return String.format(Locale.ROOT, "%.5f", value);
+    }
+
     private void addUnique(List<String> values, String value) {
         if (value == null || value.isBlank()) {
             return;
@@ -1220,25 +925,4 @@ public class PlanController {
     private record StopLocation(double lat, double lon, String addressLine) {}
 
     private record RankedPlaceCoordinate(GooglePlacesClient.PlaceCandidate candidate, int score) {}
-
-    public record RouteSuggestionDayRequest(PlanDraftResponse draft, Integer dayIndex, Integer budget, String departureDate) {}
-
-    public record CopyPolishRequest(Long planId, PlanDraftResponse draft) {}
-
-    public record WeatherForecastRequest(String city, String departureDate, Integer days) {}
-
-    public record WeatherForecastResponse(boolean available, List<WeatherDaySummary> days) {}
-
-    public record WeatherDaySummary(
-            int dayIndex,
-            String date,
-            String condition,
-            int chanceOfRain,
-            Double avgTempC,
-            Double maxTempC,
-            Double minTempC,
-            boolean rainy
-    ) {}
-
-    public record RouteDaySuggestion(int dayIndex, List<RouteSegmentSuggestion> segments) {}
 }
