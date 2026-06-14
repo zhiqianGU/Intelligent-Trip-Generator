@@ -123,10 +123,7 @@ public class PlanDraftController {
         if (draft == null) {
             return null;
         }
-        PlanDraftResponse polished = copyPolishService.applyCopyPolishPatch(
-                draft,
-                planProcessorService::finalizeCopyPolishDraft
-        );
+        PlanDraftResponse polished = copyPolishService.applyCopyPolishPatch(draft);
         Long planId = request == null ? null : request.planId();
         if (userId != null && planId != null && planId > 0 && polished != null) {
             planService.updatePlanCopy(userId, planId, polished);

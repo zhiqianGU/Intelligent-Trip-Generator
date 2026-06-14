@@ -11,46 +11,40 @@ import thesis.project.gu.planning.api.dto.PlanDraftResponse.Place;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.function.UnaryOperator;
 
 @Service
 public class CopyPolishService {
     private static final Logger log = LoggerFactory.getLogger(CopyPolishService.class);
 
     private final TripAiService aiService;
+    private final PlanFinalizationService planFinalizationService;
 
-    public CopyPolishService(TripAiService aiService) {
+    public CopyPolishService(TripAiService aiService, PlanFinalizationService planFinalizationService) {
         this.aiService = aiService;
+        this.planFinalizationService = planFinalizationService;
     }
 
-    public PlanDraftResponse applyCopyPolishPatch(
-            PlanDraftResponse verifiedDraft,
-            UnaryOperator<PlanDraftResponse> finalizer
-    ) {
+    public PlanDraftResponse applyCopyPolishPatch(PlanDraftResponse verifiedDraft) {
         if (verifiedDraft == null) {
             return null;
         }
         try {
             TripAiService.CopyPolishResult result = aiService.polishPlanCopy(verifiedDraft);
             if (result.completed()) {
-                return withCopyPolishStatus(mergeAllowedCopyFields(verifiedDraft, result.draft()), "completed", finalizer);
+                return withCopyPolishStatus(mergeAllowedCopyFields(verifiedDraft, result.draft()), "completed");
             }
-            return withCopyPolishStatus(verifiedDraft, "fallback-" + result.status(), finalizer);
+            return withCopyPolishStatus(verifiedDraft, "fallback-" + result.status());
         } catch (Exception e) {
             log.debug("Async copy polish fallback to verified draft", e);
-            return withCopyPolishStatus(verifiedDraft, "error", finalizer);
+            return withCopyPolishStatus(verifiedDraft, "error");
         }
     }
 
-    public PlanDraftResponse withCopyPolishStatus(
-            PlanDraftResponse draft,
-            String status,
-            UnaryOperator<PlanDraftResponse> finalizer
-    ) {
+    public PlanDraftResponse withCopyPolishStatus(PlanDraftResponse draft, String status) {
         if (draft == null) {
             return null;
         }
-        PlanDraftResponse safeDraft = finalizer == null ? draft : finalizer.apply(draft);
+        PlanDraftResponse safeDraft = planFinalizationService.finalizeCopyPolishDraft(draft);
         return new PlanDraftResponse(
                 safeDraft.city(),
                 safeDraft.country(),
