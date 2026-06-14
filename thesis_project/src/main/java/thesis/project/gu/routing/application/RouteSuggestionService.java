@@ -15,14 +15,10 @@ import thesis.project.gu.routing.domain.StopCoordinate;
 import thesis.project.gu.routing.infrastructure.dto.GeoResponse;
 import thesis.project.gu.weather.infrastructure.WeatherApiClient;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -37,6 +33,8 @@ public class RouteSuggestionService {
     private final WeatherApiClient weatherApiClient;
     private final GooglePlacesClient googlePlacesClient;
     private final PlaceHeuristicService placeHeuristicService;
+    private final RouteSuggestionCacheKeyBuilder cacheKeyBuilder;
+    private final RouteModeRecommendationService routeModeRecommendationService;
     private final ExecutorService routeExecutor;
     private final com.github.benmanes.caffeine.cache.Cache<String, RouteDaySuggestion> routeSuggestionDayCache = Caffeine.newBuilder()
             .maximumSize(1_000)
@@ -48,12 +46,16 @@ public class RouteSuggestionService {
             WeatherApiClient weatherApiClient,
             GooglePlacesClient googlePlacesClient,
             PlaceHeuristicService placeHeuristicService,
+            RouteSuggestionCacheKeyBuilder cacheKeyBuilder,
+            RouteModeRecommendationService routeModeRecommendationService,
             @Qualifier("routeExecutor") ExecutorService routeExecutor
     ) {
         this.mapService = mapService;
         this.weatherApiClient = weatherApiClient;
         this.googlePlacesClient = googlePlacesClient;
         this.placeHeuristicService = placeHeuristicService;
+        this.cacheKeyBuilder = cacheKeyBuilder;
+        this.routeModeRecommendationService = routeModeRecommendationService;
         this.routeExecutor = routeExecutor;
     }
 
@@ -78,7 +80,7 @@ public class RouteSuggestionService {
             RouteRecommendationContext recommendationContext,
             String departureDate
     ) {
-        String cacheKey = routeSuggestionDayCacheKey(draft, day, departureDate);
+        String cacheKey = cacheKeyBuilder.buildDayKey(draft, day, departureDate);
         if (cacheKey.isBlank()) {
             return routeSuggestionForDay(draft, day, recommendationContext);
         }
@@ -101,52 +103,6 @@ public class RouteSuggestionService {
         List<RouteSegmentSuggestion> segments = new ArrayList<>(resolveHotelStartRouteSuggestion(day.dayIndex(), day, recommendationContext));
         segments.addAll(resolveRouteSuggestions(day.dayIndex(), stops, coordinates, recommendationContext));
         return new RouteDaySuggestion(day.dayIndex(), segments);
-    }
-
-    private String routeSuggestionDayCacheKey(PlanDraftResponse draft, PlanDraftResponse.DayPlan day, String departureDate) {
-        if (draft == null || day == null) {
-            return "";
-        }
-        StringBuilder source = new StringBuilder(512)
-                .append("city=").append(nullToEmpty(draft.city()))
-                .append("|days=").append(draft.days())
-                .append("|pace=").append(nullToEmpty(draft.pace()))
-                .append("|kids=").append(draft.party() == null ? "" : draft.party().kids())
-                .append("|departure=").append(nullToEmpty(departureDate))
-                .append("|copy=").append(nullToEmpty(draft.copyPolishStatus()))
-                .append("|day=").append(day.dayIndex());
-        appendRouteCachePlace(source, "hotel", day.hotel());
-        if (day.stops() != null) {
-            for (int i = 0; i < day.stops().size(); i++) {
-                appendRouteCachePlace(source, "stop-" + i, day.stops().get(i));
-            }
-        }
-        return "route-suggestion-day:" + sha256Url(source.toString());
-    }
-
-    private void appendRouteCachePlace(StringBuilder source, String label, PlanDraftResponse.Place place) {
-        source.append('|').append(label).append('=');
-        if (place == null) {
-            source.append("null");
-            return;
-        }
-        source.append(nullToEmpty(place.name()))
-                .append('@').append(nullToEmpty(place.addressLine()))
-                .append('@').append(nullToEmpty(place.startTime()))
-                .append('-').append(nullToEmpty(place.endTime()))
-                .append('@').append(place.latitude() == null ? "" : roundCoordinate(place.latitude()))
-                .append(',')
-                .append(place.longitude() == null ? "" : roundCoordinate(place.longitude()));
-    }
-
-    private String sha256Url(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hashed = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(hashed);
-        } catch (NoSuchAlgorithmException e) {
-            return Integer.toHexString(value.hashCode());
-        }
     }
 
     private RouteRecommendationContext routeRecommendationContext(PlanDraftResponse draft, String departureDateRaw) {
@@ -272,7 +228,7 @@ public class RouteSuggestionService {
         String origin = from.asLatLon();
         String destination = to.asLatLon();
         boolean rainy = isRainyDuringSegment(recommendationContext, dayIndex, fromStop, toStop);
-        RouteChoice routeChoice = resolveRouteChoice(origin, destination, recommendationContext, rainy);
+        RouteChoice routeChoice = routeModeRecommendationService.resolveRouteChoice(origin, destination, recommendationContext, rainy);
         ModeSummary walk = routeChoice.walk();
         ModeSummary transit = routeChoice.transit();
         ModeSummary car = routeChoice.car();
@@ -374,48 +330,6 @@ public class RouteSuggestionService {
         );
     }
 
-    private ModeSummary modeSummary(String mode, RouteSummarySupplier supplier) {
-        try {
-            MapService.RouteSummary summary = supplier.get();
-            if (summary == null || summary.durationSeconds() == null || summary.durationSeconds().isBlank()) {
-                return null;
-            }
-            Integer durationMinutes = routeSummaryMinutes(() -> summary);
-            Integer distanceMeters = parseInteger(summary.distanceMeters());
-            if (durationMinutes == null || durationMinutes <= 0) {
-                return null;
-            }
-            return new ModeSummary(mode, durationMinutes, distanceMeters);
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
-    private ModeSummary normalizeCarSummary(ModeSummary car) {
-        if (car == null || car.distanceMeters() == null || car.distanceMeters() <= 0) {
-            return car;
-        }
-        int urbanFloor = Math.max(5, (int) Math.ceil((car.distanceMeters() / 1000.0) / 25.0 * 60.0) + 3);
-        int normalizedMinutes = Math.max(car.durationMinutes(), urbanFloor);
-        return new ModeSummary(car.mode(), normalizedMinutes, car.distanceMeters());
-    }
-
-    private RouteChoice resolveRouteChoice(
-            String origin,
-            String destination,
-            RouteRecommendationContext context,
-            boolean rainy
-    ) {
-        if (origin == null || origin.isBlank() || destination == null || destination.isBlank()) {
-            return new RouteChoice(null, null, null, null);
-        }
-        ModeSummary walk = modeSummary("walk", () -> mapService.walk_summary(origin, destination));
-        ModeSummary transit = modeSummary("transit", () -> mapService.transit_summary(origin, destination));
-        ModeSummary car = normalizeCarSummary(modeSummary("car", () -> mapService.car_summary(origin, destination)));
-        ModeSummary recommended = recommendMode(walk, transit, car, context, rainy);
-        return new RouteChoice(walk, transit, car, recommended);
-    }
-
     private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
         final double earthRadius = 6371000D;
         double dLat = Math.toRadians(lat2 - lat1);
@@ -441,17 +355,6 @@ public class RouteSuggestionService {
                 || name.contains("walking path"));
     }
 
-    private Integer parseInteger(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return (int) Math.round(Double.parseDouble(value.trim()));
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
     private boolean isRainyDuringSegment(
             RouteRecommendationContext context,
             int dayIndex,
@@ -467,44 +370,6 @@ public class RouteSuggestionService {
             time = parseLocalTime(fromStop == null ? null : fromStop.endTime());
         }
         return context.forecast().rainyAt(date, time);
-    }
-
-    private ModeSummary recommendMode(
-            ModeSummary walk,
-            ModeSummary transit,
-            ModeSummary car,
-            RouteRecommendationContext context,
-            boolean rainy
-    ) {
-        boolean hasKids = context != null && context.hasKids();
-        int walkDirectThreshold = hasKids ? 15 : 20;
-        int walkCompareThreshold = hasKids ? 20 : 30;
-        if (rainy) {
-            walkDirectThreshold = Math.min(walkDirectThreshold, 10);
-            walkCompareThreshold = Math.min(walkCompareThreshold, 15);
-        }
-
-        if (walk != null && walk.durationMinutes() <= walkDirectThreshold) {
-            return walk;
-        }
-
-        if (transit != null) {
-            if (walk != null
-                    && walk.durationMinutes() <= walkCompareThreshold
-                    && transit.durationMinutes() - walk.durationMinutes() > -8) {
-                return walk;
-            }
-            if (car != null && transit.durationMinutes() - car.durationMinutes() >= 20) {
-                return car;
-            }
-            return transit;
-        }
-
-        if (car != null) {
-            return car;
-        }
-
-        return walk;
     }
 
     public List<StopCoordinate> resolveStopCoordinatesInParallel(List<PlanDraftResponse.Place> stops) {
@@ -525,22 +390,6 @@ public class RouteSuggestionService {
         try {
             return future.join();
         } catch (CompletionException e) {
-            return null;
-        }
-    }
-
-    private Integer routeSummaryMinutes(RouteSummarySupplier supplier) {
-        try {
-            MapService.RouteSummary summary = supplier.get();
-            if (summary == null || summary.durationSeconds() == null || summary.durationSeconds().isBlank()) {
-                return null;
-            }
-            int seconds = (int) Math.round(Double.parseDouble(summary.durationSeconds().trim()));
-            if (seconds <= 0) {
-                return null;
-            }
-            return Math.max(1, (int) Math.ceil(seconds / 60.0));
-        } catch (RuntimeException e) {
             return null;
         }
     }
@@ -835,13 +684,6 @@ public class RouteSuggestionService {
         return value == null ? "" : value;
     }
 
-    private String roundCoordinate(Double value) {
-        if (value == null) {
-            return "";
-        }
-        return String.format(Locale.ROOT, "%.5f", value);
-    }
-
     private void addUnique(List<String> values, String value) {
         if (value == null || value.isBlank()) {
             return;
@@ -916,10 +758,6 @@ public class RouteSuggestionService {
                 || text.contains("theme park")
                 || text.contains("amusement park")
                 || text.contains("water park");
-    }
-
-    private interface RouteSummarySupplier {
-        MapService.RouteSummary get();
     }
 
     private record StopLocation(double lat, double lon, String addressLine) {}

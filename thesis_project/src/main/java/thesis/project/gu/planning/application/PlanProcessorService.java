@@ -55,9 +55,7 @@ import java.util.stream.Collectors;
 @Service
 public class PlanProcessorService {
     private static final Logger log = LoggerFactory.getLogger(PlanProcessorService.class);
-    private static final String PHASED_PIPELINE_FLAG = "itrip.plan.phased.enabled";
     private static final String RELAXED_VALIDATION_BENCHMARK_FLAG = "itrip.plan.validation.relaxedForBenchmark";
-    private static final int AUTO_PHASED_MIN_DAYS = 3;
     private static final int AUTO_PHASED_RETRY_MIN_DAYS = 3;
     private static final int MAX_PLAN_RETRY_ATTEMPTS = 1;
     private static final int MAX_INVALID_JSON_REPAIR_ATTEMPTS = 2;
@@ -127,6 +125,8 @@ public class PlanProcessorService {
     private final StringRedisTemplate stringRedisTemplate;
     private final LocalPlanGeneratorService localPlanGeneratorService;
     private final LocalPlanQualityDiagnosticService localPlanQualityDiagnosticService;
+    private final PlanGenerationModeResolver planGenerationModeResolver;
+    private final CopyPolishService copyPolishService;
 
     public PlanProcessorService(
             TripAiService aiService,
@@ -141,7 +141,9 @@ public class PlanProcessorService {
             PlaceHeuristicService placeHeuristicService,
             StringRedisTemplate stringRedisTemplate,
             LocalPlanGeneratorService localPlanGeneratorService,
-            LocalPlanQualityDiagnosticService localPlanQualityDiagnosticService
+            LocalPlanQualityDiagnosticService localPlanQualityDiagnosticService,
+            PlanGenerationModeResolver planGenerationModeResolver,
+            CopyPolishService copyPolishService
     ) {
         this.aiService = aiService;
         this.cacheSerive = cacheSerive;
@@ -156,6 +158,8 @@ public class PlanProcessorService {
         this.stringRedisTemplate = stringRedisTemplate;
         this.localPlanGeneratorService = localPlanGeneratorService;
         this.localPlanQualityDiagnosticService = localPlanQualityDiagnosticService;
+        this.planGenerationModeResolver = planGenerationModeResolver;
+        this.copyPolishService = copyPolishService;
     }
 
     PlanDraftResponse processExistingRawDraft(CreatePlanReq req, String raw, boolean redisHit, long aiGenerationMs) throws Exception {
@@ -167,7 +171,8 @@ public class PlanProcessorService {
     }
 
     public PlanDraftResponse generateDraft(CreatePlanReq req, boolean redisHit, boolean deferCopyPolish) throws Exception {
-        if (isLocalFastMode(req)) {
+        PlanGenerationModeResolver.GenerationMode mode = planGenerationModeResolver.resolve(req);
+        if (mode.localFast()) {
             long startedAt = System.currentTimeMillis();
             PlanDraftResponse draft = localPlanGeneratorService.generate(req);
             if (deferCopyPolish) {
@@ -191,20 +196,14 @@ public class PlanProcessorService {
         log.info("Plan generation start city={} requestedDays={} phasedGeneration={} redisHit={}",
                 req == null ? null : req.city(),
                 req == null ? null : req.days(),
-                isPhasedGenerationEnabled(req),
+                mode.phasedGeneration(),
                 redisHit);
         long aiStartedAt = System.currentTimeMillis();
-        String raw = isPhasedGenerationEnabled(req)
+        String raw = mode.phasedGeneration()
                 ? aiService.generatePlanRawPhased(req)
                 : aiService.generatePlanRaw(req);
         long aiGenerationMs = System.currentTimeMillis() - aiStartedAt;
         return processDraftSinglePass(req, raw, redisHit, aiGenerationMs, deferCopyPolish);
-    }
-
-    private boolean isLocalFastMode(CreatePlanReq req) {
-        return req != null
-                && req.mainModel() != null
-                && "local-fast".equals(req.mainModel().trim().toLowerCase(Locale.ROOT));
     }
 
     private PlanDraftResponse processDraftSinglePass(
@@ -242,11 +241,7 @@ public class PlanProcessorService {
     }
 
     private boolean isPhasedGenerationEnabled(CreatePlanReq req) {
-        if (Boolean.parseBoolean(System.getProperty(PHASED_PIPELINE_FLAG, "false"))) {
-            return true;
-        }
-        int days = req == null ? 0 : req.days();
-        return days >= AUTO_PHASED_MIN_DAYS;
+        return planGenerationModeResolver.isPhasedGenerationEnabled(req);
     }
 
     private PlanDraftResponse validateAndRetry(
@@ -2523,28 +2518,12 @@ public class PlanProcessorService {
             TripAiService.CopyPolishResult result = aiService.polishPlanCopy(verifiedDraft);
             appendStageTiming(timingSummary, timingLabel, System.currentTimeMillis() - startedAt);
             if (result.completed()) {
-                return withCopyPolishStatus(mergeAllowedCopyFields(verifiedDraft, result.draft()), "completed");
+                return withCopyPolishStatus(copyPolishService.mergeAllowedCopyFields(verifiedDraft, result.draft()), "completed");
             }
             return withCopyPolishStatus(verifiedDraft, "fallback-" + result.status());
         } catch (Exception e) {
             appendStageTiming(timingSummary, timingLabel, System.currentTimeMillis() - startedAt);
             log.debug("Copy polish fallback to verified draft", e);
-            return withCopyPolishStatus(verifiedDraft, "error");
-        }
-    }
-
-    public PlanDraftResponse applyCopyPolishPatch(PlanDraftResponse verifiedDraft) {
-        if (verifiedDraft == null) {
-            return null;
-        }
-        try {
-            TripAiService.CopyPolishResult result = aiService.polishPlanCopy(verifiedDraft);
-            if (result.completed()) {
-                return withCopyPolishStatus(mergeAllowedCopyFields(verifiedDraft, result.draft()), "completed");
-            }
-            return withCopyPolishStatus(verifiedDraft, "fallback-" + result.status());
-        } catch (Exception e) {
-            log.debug("Async copy polish fallback to verified draft", e);
             return withCopyPolishStatus(verifiedDraft, "error");
         }
     }
@@ -2618,23 +2597,12 @@ public class PlanProcessorService {
     }
 
     private PlanDraftResponse withCopyPolishStatus(PlanDraftResponse draft, String status) {
-        if (draft == null) {
-            return null;
-        }
+        return copyPolishService.withCopyPolishStatus(draft, status, this::finalizeCopyPolishDraft);
+    }
+
+    public PlanDraftResponse finalizeCopyPolishDraft(PlanDraftResponse draft) {
         PlanDraftResponse safeDraft = finalScheduleSafetyPass(draft);
-        safeDraft = sanitizeFinalCopy(safeDraft);
-        return new PlanDraftResponse(
-                safeDraft.city(),
-                safeDraft.country(),
-                safeDraft.days(),
-                safeDraft.currency(),
-                safeDraft.party(),
-                safeDraft.pace(),
-                safeDraft.title(),
-                safeDraft.overview(),
-                safeDraft.daysPlan(),
-                status
-        );
+        return sanitizeFinalCopy(safeDraft);
     }
 
     private PlanDraftResponse sanitizeFinalCopy(PlanDraftResponse draft) {
@@ -2749,124 +2717,6 @@ public class PlanProcessorService {
                 adjustedDays,
                 draft.copyPolishStatus()
         );
-    }
-
-    private PlanDraftResponse mergeAllowedCopyFields(PlanDraftResponse base, PlanDraftResponse polished) {
-        if (base == null || polished == null) {
-            return base;
-        }
-        List<DayPlan> baseDays = base.daysPlan() == null ? List.of() : base.daysPlan();
-        List<DayPlan> polishedDays = polished.daysPlan() == null ? List.of() : polished.daysPlan();
-        List<DayPlan> mergedDays = new ArrayList<>();
-        for (int i = 0; i < baseDays.size(); i++) {
-            DayPlan baseDay = baseDays.get(i);
-            DayPlan polishedDay = i < polishedDays.size() ? polishedDays.get(i) : null;
-            mergedDays.add(mergeDayCopy(baseDay, polishedDay));
-        }
-        return new PlanDraftResponse(
-                base.city(),
-                base.country(),
-                base.days(),
-                base.currency(),
-                base.party(),
-                base.pace(),
-                base.title(),
-                selectCopy(polished.overview(), base.overview()),
-                mergedDays,
-                base.copyPolishStatus()
-        );
-    }
-
-    private DayPlan mergeDayCopy(DayPlan base, DayPlan polished) {
-        if (base == null) {
-            return null;
-        }
-        List<Place> baseStops = base.stops() == null ? List.of() : base.stops();
-        List<Place> polishedStops = polished == null || polished.stops() == null ? List.of() : polished.stops();
-        List<Place> mergedStops = new ArrayList<>();
-        for (int i = 0; i < baseStops.size(); i++) {
-            Place polishedStop = i < polishedStops.size() ? polishedStops.get(i) : null;
-            mergedStops.add(mergePlaceCopy(baseStops.get(i), polishedStop));
-        }
-        return new DayPlan(
-                base.dayIndex(),
-                mergePlaceCopy(base.hotel(), polished == null ? null : polished.hotel()),
-                mergedStops,
-                base.theme(),
-                base.morningNote(),
-                base.afternoonNote(),
-                base.eveningNote(),
-                base.note()
-        );
-    }
-
-    private Place mergePlaceCopy(Place base, Place polished) {
-        if (base == null) {
-            return null;
-        }
-        String reason = selectCopy(polished == null ? null : polished.reason(), base.reason());
-        String tip = selectCopy(polished == null ? null : polished.tip(), base.tip());
-        if (isThemeParkLikeStop(base)) {
-            reason = sanitizeThemeParkCopy(reason);
-            tip = sanitizeThemeParkCopy(tip);
-        }
-        return new Place(
-                base.name(),
-                base.addressLine(),
-                base.suburb(),
-                base.city(),
-                base.state(),
-                base.postcode(),
-                base.country(),
-                base.category(),
-                base.stayMinutes(),
-                base.timeSlot(),
-                base.startTime(),
-                base.endTime(),
-                base.mealType(),
-                base.preferredArea(),
-                base.cuisine(),
-                base.vibe(),
-                base.budgetLevel(),
-                reason,
-                tip,
-                base.websiteUri(),
-                base.googleMapsUri(),
-                base.businessStatus(),
-                base.url(),
-                base.latitude(),
-                base.longitude()
-        );
-    }
-
-    private String selectCopy(String candidate, String fallback) {
-        String selected = candidate == null || candidate.isBlank() ? fallback : candidate.trim();
-        return sanitizeNarrativeCopy(selected);
-    }
-
-    private String sanitizeNarrativeCopy(String value) {
-        if (value == null || value.isBlank()) {
-            return value;
-        }
-        String sanitized = value
-                .replaceAll("(?i)\\bwalkable\\b", "compact")
-                .replaceAll("(?i)\\btransit-friendly\\b", "manageable")
-                .replaceAll("(?i)\\btransit friendly\\b", "manageable")
-                .replaceAll("(?i)\\btour access\\b", "scheduled access")
-                .replaceAll("(?i)\\btours\\b", "scheduled visits")
-                .replaceAll("(?i)\\btour\\b", "scheduled visit")
-                .trim();
-        sanitized = removeRiskyNarrativeSentences(sanitized);
-        return sanitized.isBlank() ? value.replaceAll("(?i)\\bpriority access\\b", "optional add-ons")
-                .replaceAll("(?i)\\btimed entry\\b", "entry requirements")
-                .replaceAll("(?i)\\bferry terminal\\b", "nearby access point")
-                .replaceAll("(?i)\\bparking hassles\\b", "access issues")
-                .replaceAll("(?i)\\bshuttle\\b", "transport")
-                .replaceAll("(?i)\\bpriority access\\b", "optional access")
-                .replaceAll("(?i)\\bguaranteed\\b", "planned")
-                .replaceAll("(?i)\\bfreshest\\b", "fresh")
-                .replaceAll("(?i)\\bbest\\b", "good")
-                .trim() : sanitized;
     }
 
     private String sanitizeNarrativeCopyStrict(String value, String fallback) {

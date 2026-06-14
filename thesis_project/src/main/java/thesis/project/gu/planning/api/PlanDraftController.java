@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.planning.application.CopyPolishService;
 import thesis.project.gu.routing.prewarm.PlanPrewarmService;
 import thesis.project.gu.planning.application.PlanProcessorService;
 import thesis.project.gu.planhistory.application.PlanService;
@@ -32,6 +33,7 @@ public class PlanDraftController {
     private final RuntimeMetricsService runtimeMetricsService;
     private final PlanPrewarmService planPrewarmService;
     private final PlanProcessorService planProcessorService;
+    private final CopyPolishService copyPolishService;
 
     public PlanDraftController(
             PlanService planService,
@@ -39,7 +41,8 @@ public class PlanDraftController {
             CacheManager cacheManager,
             RuntimeMetricsService runtimeMetricsService,
             PlanPrewarmService planPrewarmService,
-            PlanProcessorService planProcessorService
+            PlanProcessorService planProcessorService,
+            CopyPolishService copyPolishService
     ) {
         this.planService = planService;
         this.aiService = aiService;
@@ -47,6 +50,7 @@ public class PlanDraftController {
         this.runtimeMetricsService = runtimeMetricsService;
         this.planPrewarmService = planPrewarmService;
         this.planProcessorService = planProcessorService;
+        this.copyPolishService = copyPolishService;
     }
 
     @PostMapping(value = "/draft", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
@@ -119,7 +123,10 @@ public class PlanDraftController {
         if (draft == null) {
             return null;
         }
-        PlanDraftResponse polished = planProcessorService.applyCopyPolishPatch(draft);
+        PlanDraftResponse polished = copyPolishService.applyCopyPolishPatch(
+                draft,
+                planProcessorService::finalizeCopyPolishDraft
+        );
         Long planId = request == null ? null : request.planId();
         if (userId != null && planId != null && planId > 0 && polished != null) {
             planService.updatePlanCopy(userId, planId, polished);
