@@ -77,8 +77,8 @@ class Rq2QualityExperimentTest {
                 PlanDraftResponse proposed = localPlanGeneratorService.generate(req);
                 PlanDraftResponse priorityOnly = generatePriorityOnly(req);
 
-                rows.add(toCsvRow("area-aware heuristic", req, diagnosticService.diagnose(proposed)));
-                rows.add(toCsvRow("priority-only", req, diagnosticService.diagnose(priorityOnly)));
+                rows.add(toCsvRow("area-aware heuristic", req, diagnosticService.diagnoseResponse(proposed)));
+                rows.add(toCsvRow("priority-only", req, diagnosticService.diagnoseResponse(priorityOnly)));
             }
         }
 

@@ -2,9 +2,18 @@ package thesis.project.gu.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import thesis.project.gu.catalog.domain.CoverageResult;
+import thesis.project.gu.catalog.domain.PlanningZoneSummary;
 import thesis.project.gu.catalog.local.LocalPoiCatalog;
 import thesis.project.gu.catalog.local.LocalPoiItem;
 import thesis.project.gu.catalog.local.LocalPoiCatalogService;
+import thesis.project.gu.planning.api.dto.CreatePlanReq;
+import thesis.project.gu.planning.domain.PlaceCandidatePool;
+import thesis.project.gu.planning.domain.TripSkeleton;
+import thesis.project.gu.planning.domain.TripSlot;
+import thesis.project.gu.planning.domain.TripPlanningSpecification;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -67,6 +76,65 @@ class LocalPoiCatalogServiceTest {
         assertThat(catalog.totalItemCount()).isZero();
     }
 
+    @Test
+    void buildsStaticZoneSummariesFromLocalPoiAreas() {
+        TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Brisbane", 3, "normal"));
+
+        List<PlanningZoneSummary> zones = service.findAvailableZones(spec);
+
+        assertThat(zones).isNotEmpty();
+        assertThat(zones).anySatisfy(zone -> {
+            assertThat(zone.zoneId()).isEqualTo("brisbane-south-bank");
+            assertThat(zone.capabilities().attractionCount()).isGreaterThan(0);
+            assertThat(zone.capabilities().categoryCounts()).isNotEmpty();
+        });
+    }
+
+    @Test
+    void buildsTripSkeletonBeforeCoverageCheck() {
+        TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Brisbane", 2, "relaxed"));
+
+        TripSkeleton skeleton = service.buildTripSkeleton(spec);
+
+        assertThat(skeleton.days()).hasSize(2);
+        assertThat(skeleton.days().getFirst().startTime()).isEqualTo("10:00");
+        assertThat(skeleton.days().getFirst().slots())
+                .extracting(TripSlot::slotType)
+                .contains(TripSlot.SlotType.ACTIVITY, TripSlot.SlotType.LUNCH, TripSlot.SlotType.DINNER);
+    }
+
+    @Test
+    void buildsTripSkeletonUsingRetrievedZoneOrder() {
+        TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Brisbane", 2, "normal"));
+        List<PlanningZoneSummary> zones = service.findAvailableZones(spec);
+        PlanningZoneSummary southBank = zones.stream()
+                .filter(zone -> "brisbane-south-bank".equals(zone.zoneId()))
+                .findFirst()
+                .orElseThrow();
+
+        TripSkeleton skeleton = service.buildTripSkeleton(spec, List.of(southBank));
+
+        assertThat(skeleton.days()).hasSize(2);
+        assertThat(skeleton.days())
+                .allSatisfy(day -> assertThat(day.zoneId()).isEqualTo("brisbane-south-bank"));
+    }
+
+    @Test
+    void coverageCheckDistinguishesHardGapsFromReducedFallbackMargin() {
+        TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Testville", 1, "normal"));
+        TripSkeleton skeleton = service.buildTripSkeleton(spec);
+        PlaceCandidatePool pool = service.buildCandidatePool(spec);
+
+        CoverageResult coverage = service.checkCoverage(spec, skeleton, pool);
+
+        assertThat(coverage.generatable()).isFalse();
+        assertThat(coverage.gaps()).isNotEmpty();
+        assertThat(coverage.gaps()).anySatisfy(gap -> {
+            assertThat(gap.requiredUsageCount()).isGreaterThan(gap.availableCandidateCount());
+            assertThat(gap.missingCount()).isGreaterThan(0);
+        });
+    }
+
     private void hasCoreFields(LocalPoiItem item) {
         assertThat(item.name()).isNotBlank();
         assertThat(item.category()).isNotBlank();
@@ -77,5 +145,18 @@ class LocalPoiCatalogServiceTest {
         assertThat(item.longitude()).isBetween(152.0, 154.5);
         assertThat(item.budgetLevel()).isNotBlank();
         assertThat(item.familyFriendly()).isNotNull();
+    }
+
+    private CreatePlanReq req(String city, int days, String pace) {
+        return new CreatePlanReq(
+                city,
+                days,
+                1200,
+                new CreatePlanReq.Party(2, 0),
+                List.of("culture"),
+                pace,
+                "local-fast",
+                null
+        );
     }
 }

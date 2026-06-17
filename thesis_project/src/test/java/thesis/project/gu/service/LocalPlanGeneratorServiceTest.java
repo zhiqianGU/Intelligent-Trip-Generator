@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 import thesis.project.gu.catalog.local.LocalPoiCatalogService;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.planning.domain.PlaceCandidatePool;
+import thesis.project.gu.planning.domain.PlanDraft;
+import thesis.project.gu.planning.domain.TripPlanningSpecification;
 import thesis.project.gu.planning.localfast.LocalPlanGeneratorService;
 
 import java.util.HashSet;
@@ -26,6 +29,22 @@ class LocalPlanGeneratorServiceTest {
         assertThat(draft.daysPlan()).hasSize(3);
         assertThat(draft.copyPolishStatus()).isEqualTo("local-fast");
         assertThat(draft.daysPlan()).allSatisfy(this::hasLunchAndDinner);
+    }
+
+    @Test
+    void domainGeneratorPathReturnsPlanDraftWithoutResponseAdapter() {
+        CreatePlanReq req = req(2, List.of("culture"), "normal", 0);
+        TripPlanningSpecification specification = TripPlanningSpecification.fromRequest(req);
+        PlaceCandidatePool candidatePool = catalogService.buildCandidatePool(specification);
+
+        PlanDraft draft = service.generate(specification, candidatePool);
+
+        assertThat(draft.city()).isEqualTo("Brisbane");
+        assertThat(draft.days()).isEqualTo(2);
+        assertThat(draft.daysPlan()).hasSize(2);
+        assertThat(draft.daysPlan().getFirst()).isInstanceOf(PlanDraft.DayPlan.class);
+        assertThat(draft.daysPlan().getFirst().stops().getFirst()).isInstanceOf(PlanDraft.Place.class);
+        assertThat(draft.toResponse().daysPlan()).allSatisfy(this::hasLunchAndDinner);
     }
 
     @Test

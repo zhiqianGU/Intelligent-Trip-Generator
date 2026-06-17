@@ -2,6 +2,7 @@ package thesis.project.gu.planning.quality;
 
 import org.springframework.stereotype.Service;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.planning.domain.PlanDraft;
 
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -13,7 +14,7 @@ import java.util.Map;
 import java.util.Set;
 
 @Service
-public class LocalPlanQualityDiagnosticService {
+public class LocalPlanQualityDiagnosticService implements PlanQualityService {
     private static final int LUNCH_EARLIEST_MINUTES = 11 * 60 + 30;
     private static final int LUNCH_LATEST_MINUTES = 13 * 60 + 30;
     private static final int DINNER_EARLIEST_MINUTES = 17 * 60;
@@ -27,7 +28,8 @@ public class LocalPlanQualityDiagnosticService {
     private static final int SHORT_TRANSFER_MINUTES = 45;
     private static final int MEDIUM_TRANSFER_MINUTES = 75;
 
-    public LocalPlanQualityReport diagnose(PlanDraftResponse draft) {
+    @Override
+    public LocalPlanQualityReport diagnose(PlanDraft draft) {
         List<LocalPlanQualityReport.Warning> warnings = new ArrayList<>();
         if (draft == null) {
             add(warnings, LocalPlanQualityReport.Severity.ERROR, "draft-null", null, "Plan draft is null.");
@@ -43,14 +45,18 @@ public class LocalPlanQualityDiagnosticService {
         }
 
         Set<String> usedNonMealStops = new HashSet<>();
-        for (PlanDraftResponse.DayPlan day : draft.daysPlan()) {
+        for (PlanDraft.DayPlan day : draft.daysPlan()) {
             diagnoseDay(day, usedNonMealStops, warnings);
         }
         return report(warnings);
     }
 
+    public LocalPlanQualityReport diagnoseResponse(PlanDraftResponse draft) {
+        return diagnose(PlanDraft.fromResponse(draft));
+    }
+
     private void diagnoseDay(
-            PlanDraftResponse.DayPlan day,
+            PlanDraft.DayPlan day,
             Set<String> usedNonMealStops,
             List<LocalPlanQualityReport.Warning> warnings
     ) {
@@ -67,11 +73,11 @@ public class LocalPlanQualityDiagnosticService {
         int lunchCount = 0;
         int dinnerCount = 0;
         Integer previousEnd = null;
-        PlanDraftResponse.Place previous = null;
+        PlanDraft.Place previous = null;
         Map<String, Integer> nonMealAreaCounts = new HashMap<>();
-        List<PlanDraftResponse.Place> nonMealStops = new ArrayList<>();
+        List<PlanDraft.Place> nonMealStops = new ArrayList<>();
 
-        for (PlanDraftResponse.Place stop : day.stops()) {
+        for (PlanDraft.Place stop : day.stops()) {
             if (stop == null) {
                 add(warnings, LocalPlanQualityReport.Severity.ERROR, "stop-null", day.dayIndex(), "Day contains a null stop.");
                 continue;
@@ -139,8 +145,8 @@ public class LocalPlanQualityDiagnosticService {
 
     private void diagnoseTransfer(
             int dayIndex,
-            PlanDraftResponse.Place previous,
-            PlanDraftResponse.Place current,
+            PlanDraft.Place previous,
+            PlanDraft.Place current,
             List<LocalPlanQualityReport.Warning> warnings
     ) {
         Double km = distanceKm(previous, current);
@@ -161,12 +167,12 @@ public class LocalPlanQualityDiagnosticService {
 
     private void diagnoseMealDistance(
             int dayIndex,
-            List<PlanDraftResponse.Place> stops,
-            PlanDraftResponse.Place meal,
+            List<PlanDraft.Place> stops,
+            PlanDraft.Place meal,
             List<LocalPlanQualityReport.Warning> warnings
     ) {
         int mealIndex = stops.indexOf(meal);
-        PlanDraftResponse.Place nearestNonMeal = null;
+        PlanDraft.Place nearestNonMeal = null;
         for (int i = mealIndex - 1; i >= 0; i--) {
             if (!isMeal(stops.get(i))) {
                 nearestNonMeal = stops.get(i);
@@ -188,7 +194,7 @@ public class LocalPlanQualityDiagnosticService {
 
     private void diagnoseMealWindow(
             int dayIndex,
-            PlanDraftResponse.Place stop,
+            PlanDraft.Place stop,
             String mealType,
             Integer start,
             int earliest,
@@ -207,9 +213,9 @@ public class LocalPlanQualityDiagnosticService {
     }
 
     private void diagnoseThemeConsistency(
-            PlanDraftResponse.DayPlan day,
+            PlanDraft.DayPlan day,
             Map<String, Integer> nonMealAreaCounts,
-            List<PlanDraftResponse.Place> nonMealStops,
+            List<PlanDraft.Place> nonMealStops,
             List<LocalPlanQualityReport.Warning> warnings
     ) {
         if (nonMealStops.isEmpty() || nonMealAreaCounts.isEmpty()) {
@@ -259,11 +265,11 @@ public class LocalPlanQualityDiagnosticService {
         warnings.add(new LocalPlanQualityReport.Warning(severity, code, dayIndex, message));
     }
 
-    private boolean isMeal(PlanDraftResponse.Place stop) {
+    private boolean isMeal(PlanDraft.Place stop) {
         return isMeal(stop, "lunch") || isMeal(stop, "dinner");
     }
 
-    private boolean isMeal(PlanDraftResponse.Place stop, String mealType) {
+    private boolean isMeal(PlanDraft.Place stop, String mealType) {
         if (stop == null || mealType == null) {
             return false;
         }
@@ -271,11 +277,11 @@ public class LocalPlanQualityDiagnosticService {
         return target.equals(normalize(stop.mealType())) || target.equals(normalize(stop.timeSlot()));
     }
 
-    private String identityKey(PlanDraftResponse.Place stop) {
+    private String identityKey(PlanDraft.Place stop) {
         return normalize(stop == null ? null : stop.name()) + "|" + normalize(stop == null ? null : stop.addressLine());
     }
 
-    private String normalizeArea(PlanDraftResponse.Place stop) {
+    private String normalizeArea(PlanDraft.Place stop) {
         if (stop == null) {
             return "";
         }
@@ -295,7 +301,7 @@ public class LocalPlanQualityDiagnosticService {
         }
     }
 
-    private Double distanceKm(PlanDraftResponse.Place left, PlanDraftResponse.Place right) {
+    private Double distanceKm(PlanDraft.Place left, PlanDraft.Place right) {
         if (left == null || right == null || left.latitude() == null || left.longitude() == null
                 || right.latitude() == null || right.longitude() == null) {
             return null;

@@ -1,0 +1,1504 @@
+# 1.txt 首次生成链路实施步骤
+
+## 实现注意事项：防止再次形成巨型 Service
+
+这份实施计划的首要工程约束是：不能在新链路中再次形成类似旧 `PlanProcessorService` 那样的巨型文件。`PlanProcessorService` 曾经接近 7800 行，问题不只是文件长，而是 prompt、AI 调用、JSON 解析、POI 查询、排程、路线、校验、修复、缓存、日志和响应组装混在同一个类里，导致任何改动都会牵动整条链路。
+
+后续实现必须遵守以下规则：
+
+- 单个 application service 原则上不超过 300-500 行；超过时优先拆成明确职责的小服务。
+- 单个方法原则上不超过 80-120 行；复杂流程拆成私有步骤或独立 domain/application service。
+- `GenerateInitialPlanUseCase` 只做编排，不承载具体算法。
+- `PlanProcessorService` 只保留 legacy facade / adapter 角色，不再往里面添加新主链路逻辑。
+- Planning Agent、Zone Retrieval、Coverage、Scheduler、Validator、Repair、Route、Copy Polish 必须是独立边界。
+- 新增功能时优先新增小接口和小实现，不把临时代码塞进已有大类。
+- Coverage 不能调用 Scheduler 内部逻辑；Scheduler 不能自己做 Coverage Resolution。
+- Agent 不能直接生成 POI；Scheduler 不能直接调用 LLM。
+- 外部 API 调用必须通过 infrastructure adapter 或明确 application interface，不散落在业务流程中。
+- DTO、domain model、persistence entity 不要混用；转换逻辑集中在 assembler / mapper。
+- 每完成一个阶段必须补充或更新测试，至少覆盖主路径和关键降级路径。
+- 新增阶段如果需要临时实现，必须在文档中标明“临时语义”和后续替换点，避免临时方案固化。
+- 任何类如果开始同时承担三个以上职责，应立即拆分，而不是继续追加参数和私有方法。
+- 不为“先跑通”牺牲边界：可以先做简化算法，但不能把边界做反。
+
+推荐文件组织方式：
+
+```text
+planning/application
+  GenerateInitialPlanUseCase
+  LightweightRequestPreParser
+  RetrievalQueryBuilder
+  PlanningAgent
+  PlanningSpecificationValidator
+  ZoneContextBuilder
+
+catalog/application
+  DestinationResolver
+  DestinationCatalog
+  PlanningZoneRetrievalService
+  CoverageInventoryBuilder
+  CoverageGapResolutionService
+
+planning/localfast
+  LocalPlanGeneratorService
+  SlotFillingScheduler
+  CandidateScoringService
+  DayScheduleBuilder
+
+planning/quality
+  DeterministicQualityValidator
+  LocalRepairService
+
+routing/application
+  LocalRouteEstimateService
+  PreciseRouteEnhancementService
+```
+
+判断一个实现是否开始变坏：
+
+```text
+一个类既解析请求，又查 POI，又调模型，又排时间，又修复计划
+-> 必须拆分
+
+一个方法需要传入超过 6-8 个业务参数
+-> 应该引入 command/context/result 对象
+
+一个测试只能通过大量 mock 一个巨型 service 才能覆盖
+-> 说明边界已经过大
+
+一个阶段的实现无法单独验证
+-> 说明模块边界不清
+```
+
+## 外部服务选型与 Adapter 边界
+
+后续外部能力的推荐选型：
+
+```text
+模型：
+DeepSeek-v4-pro
+
+地图与地点：
+高德 API
+
+天气：
+和风天气
+```
+
+重要原则：
+- 业务层不能直接依赖 DeepSeek、高德或和风天气的 SDK / HTTP DTO。
+- 所有外部服务都必须通过 application interface + infrastructure adapter 接入。
+- 外部服务返回的数据必须先标准化为系统内部 domain model，再进入 Coverage、Scheduler、Validator。
+- 外部 API 不参与主链路自由决策，只提供事实数据或候选补充。
+- 外部 API 失败时必须有 local-first fallback，不能导致首屏结构化计划完全不可用。
+- 供应商替换不能影响 `GenerateInitialPlanUseCase`、`DestinationCatalog`、`ItineraryGenerator`、`PlanQualityService` 等核心接口。
+
+模型接入建议：
+
+```text
+planning/application/PlanningModel.java
+planning/infrastructure/deepseek/DeepSeekPlanningModelAdapter.java
+```
+
+DeepSeek-v4-pro 的职责：
+- 实现真实 `Single Planning Agent`。
+- 输出 constraints、specialEvents、dayStrategies。
+- 输出动态重规划候选 PlanPatch。
+
+DeepSeek-v4-pro 不负责：
+- 直接生成最终 POI。
+- 直接修改数据库。
+- 直接决定外部 API 调用。
+- 绕过 Coverage / Scheduler / Validator。
+
+地图与地点服务映射：
+
+| 现有服务 | 高德替代 |
+| --- | --- |
+| Google Places Search | 搜索 POI 2.0 |
+| Google Place Details | POI 2.0 ID 搜索 |
+| Google Geocoding | 地理/逆地理编码 |
+| Geoapify Route | 路径规划 2.0 |
+| 本地 POI Zone 判断 | 行政区查询 + 自定义 Planning Zone |
+| 前端地点搜索框 | 输入提示 |
+| 原始 GPS/Google 坐标 | 坐标转换 |
+| 动态交通扰动 | 交通事件 + 交通态势 |
+| 未来驾车 ETA | 高级路径规划，可选 |
+
+建议接口拆分：
+
+```text
+catalog/application/ExternalPoiSearchService.java
+catalog/application/PlaceDetailLookupService.java
+routing/application/GeocodingService.java
+routing/application/RouteCalculationService.java
+routing/application/TrafficConditionService.java
+routing/application/CoordinateTransformService.java
+weather/application/WeatherService.java
+```
+
+建议 adapter：
+
+```text
+catalog/infrastructure/amap/AmapPoiSearchAdapter.java
+catalog/infrastructure/amap/AmapPlaceDetailAdapter.java
+routing/infrastructure/amap/AmapGeocodingAdapter.java
+routing/infrastructure/amap/AmapRouteCalculationAdapter.java
+routing/infrastructure/amap/AmapTrafficAdapter.java
+routing/infrastructure/amap/AmapCoordinateTransformAdapter.java
+weather/infrastructure/qweather/QWeatherAdapter.java
+planning/infrastructure/deepseek/DeepSeekPlanningModelAdapter.java
+```
+
+高德 API 使用边界：
+- 搜索 POI 2.0 只用于 gap-driven enrichment、地点搜索和候选扩充，不默认替代本地 catalogue。
+- POI 2.0 ID 搜索用于补全详情和验证外部候选。
+- 地理/逆地理编码用于坐标补全、地址校验和用户输入解析。
+- 路径规划 2.0 用于异步精确路线，不阻塞首屏 local-fast。
+- 行政区查询只能辅助 zone 判断，最终仍以系统自定义 Planning Zone 为准。
+- 坐标转换用于处理历史 Google/GPS 坐标与高德坐标系差异。
+- 交通事件和交通态势用于动态扰动和重规划，不进入普通首次生成的同步关键路径。
+
+和风天气使用边界：
+- 用于 weather snapshot、降雨/高温/恶劣天气判断和 indoor fallback。
+- 首屏可以使用缓存或默认天气风险，不强制等待实时天气。
+- 天气影响应进入 constraints、Coverage、Scheduler scoring 和异步 replan，不直接让模型自由改计划。
+
+迁移时不要一次性替换所有外部服务。建议顺序：
+1. 先抽象接口，保留现有实现。
+2. 增加高德 geocoding / route adapter。
+3. 增加高德 POI search / detail adapter。
+4. 增加和风天气 adapter。
+5. 增加 DeepSeek planning model adapter。
+6. 每替换一个 adapter，都保留现有测试和 fallback。
+
+本文档用于把当前 Spring Boot + MySQL 智能旅行规划系统，从当前 `local-fast / local-first` 主路径逐步迁移到 `1.txt` 定义的最终首次生成链路。
+
+标记规则：
+- 已完成的步骤在标题末尾追加 `（complete）`。
+- 后续每完成一部分，就更新对应步骤并追加 `（complete）`。
+- 不推翻当前可运行链路，不删除旧链路；先保证 `/api/v1/plans/draft` 的 local-fast 首屏结构化计划始终可用。
+- 当前没有向量召回前，不把运行模式命名为 Hybrid RAG；先使用 `ZONE_GUIDED_LOCAL_FIRST` 或 `STRUCTURED_RETRIEVAL_LOCAL_FIRST`。
+
+最终目标链路：
+
+```text
+Lightweight Request Pre-parser
+-> Destination Resolver
+-> Retrieval Query Builder
+-> Structured / Hybrid Planning Zone Retrieval
+-> Zone Context Builder
+-> Single Planning Agent
+-> Planning Specification Validator
+-> Trip Skeleton Builder
+-> Catalog Inventory / Coverage View
+-> Minimum Catalog Coverage Check
+-> Coverage Gap Resolution
+-> Final Candidate Pool
+-> Local-first Scheduler
+-> Deterministic Quality Validator
+-> Local Repair
+-> 返回首屏结构化计划
+-> 异步增强
+```
+
+重要约束：
+- RAG 只负责 Planning Zone 召回和 Zone 能力上下文。
+- Agent 只负责 constraints、specialEvents、dayStrategies，不生成具体 POI。
+- Scheduler、Coverage、Validator、Repair 保持确定性后端能力。
+- Hard Gap 不能长期只打日志；过渡期可以观测，最终必须触发 resolution。
+- Coverage 用的是 request-scoped inventory/view，不等同于最终给 Scheduler 使用的 Candidate Pool。
+
+当前代码基线：
+- `GenerateInitialPlanUseCase` 已是首次生成主入口。
+- `PlanProcessorService` 已基本退为 legacy facade / adapter。
+- `PlanDraft` 已作为内部 itinerary model 使用。
+- `DestinationCatalog`、`ItineraryGenerator`、`RoutePlanningService`、`DefaultPlanQualityService` 等边界已存在。
+- local-fast 主路径已经基于本地 POI catalogue 生成结构化计划。
+- LLM 主要保留在 AI-first legacy path 和异步 copy polish 能力中。
+
+---
+
+## 阶段 0：确认当前主路径和保护验证命令（complete）
+
+目标：
+- 明确当前 local-fast 主路径。
+- 保留现有行为验证，避免后续迁移破坏首屏计划返回。
+
+当前主路径：
+
+```text
+/api/v1/plans/draft
+-> PlanProcessorService legacy facade
+-> GenerateInitialPlanUseCase
+-> TripPlanningSpecification.fromRequest
+-> DestinationCatalog.buildCandidatePool
+-> ItineraryGenerator.generate
+-> PlanQualityService.diagnose
+-> PlanDraftResponse
+```
+
+常用验证命令：
+
+```powershell
+.\mvnw.cmd -q -DskipTests compile
+.\mvnw.cmd -q "-Dtest=LocalPoiCatalogServiceTest,LocalPlanGeneratorServiceTest,PlanningDomainBoundaryTest" test
+.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test
+```
+
+本轮已验证：
+
+```powershell
+.\mvnw.cmd -q -DskipTests compile
+.\mvnw.cmd -q "-Dtest=LocalPoiCatalogServiceTest,LocalPlanGeneratorServiceTest,PlanningDomainBoundaryTest" test
+.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test
+```
+
+---
+
+## 阶段 1：建立无向量、无 Agent 的 Zone 基础（complete）
+
+目标：
+- 先建立 `PlanningZone` 概念，但不引入 vector DB 和 Planning Agent。
+- 让本地 POI catalogue 的 `area` 字段可以生成静态 Zone Summary。
+- 为后续 RAG / Agent 提供 zone-level capability context 打基础。
+
+已完成内容：
+- 新增 `thesis.project.gu.catalog.domain.PlanningZone`。
+- 新增 `thesis.project.gu.catalog.domain.PlanningZoneSummary`。
+- 新增 `thesis.project.gu.catalog.domain.ZoneCapabilitySummary`。
+- `LocalPoiCatalogService.findAvailableZones(...)` 已基于 POI `area` 聚合 zone summary。
+
+当前 Zone summary 包含：
+- zoneId
+- name
+- destinationCity
+- zoneType
+- themes
+- attractionCount
+- restaurantCount
+- hotelCount
+- lunchRestaurantCount
+- dinnerRestaurantCount
+- familyFriendlyCount
+- categoryCounts
+- styleTagCounts
+- recommendedAllocation
+
+当前实现边界：
+- zoneId 目前由 `city + area` 派生，例如 `brisbane-south-bank`。
+- 不做向量召回。
+- 不做语义 rerank。
+- 不写入数据库 snapshot。
+- Zone summary 每次从本地 catalogue 内存对象聚合。
+- 当前统计更接近静态能力统计，尚未严格区分 request-scoped availability。
+
+后续必须调整：
+- 拆分静态 `PlanningZoneSnapshot` 和请求级 `AvailableZoneSummary`。
+- 静态 snapshot 记录稳定能力；请求级 summary 根据日期、预算、儿童、pace、室内外偏好、营业时间和数据新鲜度动态过滤。
+
+---
+
+## 阶段 2：扩展 TripPlanningSpecification 为高层规划承载对象（complete）
+
+目标：
+- 让 `TripPlanningSpecification` 不只是 request wrapper。
+- 为 Planning Agent 未来输出的 constraints、specialEvents、dayStrategies 预留结构。
+
+已完成内容：
+- `TripPlanningSpecification` 新增：
+  - `constraints`
+  - `specialEvents`
+  - `dayStrategies`
+- 新增内部 record：
+  - `Constraints`
+  - `SpecialEvent`
+  - `DayStrategy`
+- 保留旧 8 参数构造器，兼容现有调用代码。
+- `fromRequest(...)` 会从 `CreatePlanReq` 推导基础 constraints：
+  - preferredStartTime
+  - pace
+  - budget
+  - preferredStyles
+  - familyFriendly
+
+当前实现边界：
+- 暂时没有自然语言 parser。
+- 暂时没有从 raw request 识别 birthday、rainy day、late start 等复杂语义。
+- `specialEvents` 和 `dayStrategies` 默认仍为空。
+
+后续可演进：
+- 接入 Lightweight Request Pre-parser。
+- 接入 Single Planning Agent 后，把 Agent 输出映射进 `specialEvents` 和 `dayStrategies`。
+- 增加 Planning Specification Validator。
+
+---
+
+## 阶段 3：建立 TripSkeleton / TripSlot（complete）
+
+目标：
+- 在 Coverage Check 前先知道每天需要多少 activity、meal、special event slots。
+- 对齐 `1.txt` 中 “Trip Skeleton Builder 必须在 Coverage Check 前执行” 的顺序。
+
+已完成内容：
+- 新增 `thesis.project.gu.planning.domain.TripSkeleton`。
+- 新增 `thesis.project.gu.planning.domain.TripSlot`。
+- `DestinationCatalog.buildTripSkeleton(...)` 已建立接口。
+- `LocalPoiCatalogService.buildTripSkeleton(...)` 已提供本地默认实现。
+
+当前 skeleton 规则：
+- 根据 `days` 生成 day skeleton。
+- 根据 `pace` 决定 activity slot 数：
+  - relaxed: 2
+  - normal: 3
+  - rush/fast/intense: 4
+- 有儿童时降低每日 activity 密度。
+- 每天默认包含 activity slots、lunch slot、dinner slot。
+- relaxed pace 默认 startTime 为 `10:00`，其他默认为 `09:00`。
+- 如果存在 birthday special event，dinner slot 会带 `birthday-suitable` capability。
+
+当前实现边界：
+- `specialEvents` 目前不会自动生成，除非未来上游填入。
+- 还没有复杂 day allocation。
+- 还没有 rain fallback / indoor slots。
+- slot capability matching 当前是最小版本。
+
+后续可演进：
+- 根据 `DayStrategy` 生成更细的 day-level slot。
+- 加入 indoor/outdoor、birthday、reservation、late start 等 capability。
+- 加入 half-day/full-day allocation。
+- 根据 zoneType 生成不同 skeleton，例如大型景点不强制 3 个 activity POI。
+
+---
+
+## 阶段 4：建立 CoverageResult / CoverageGap，并扩展 DestinationCatalog（complete）
+
+目标：
+- Coverage Check 要区分最低可生成阈值和理想候选阈值。
+- Soft Gap 可以继续生成；Hard Gap 最终必须触发 resolution，不能长期无条件继续。
+- Coverage 使用的是 coverage inventory / available view，不等同于最终 Candidate Pool。
+
+已完成内容：
+- 新增 `thesis.project.gu.catalog.domain.CoverageResult`。
+- 新增 `thesis.project.gu.catalog.domain.CoverageGap`。
+- `DestinationCatalog` 新增：
+  - `findAvailableZones(...)`
+  - `buildTripSkeleton(...)`
+  - `checkCoverage(...)`
+  - `buildCandidatePool(...)`
+- `LocalPoiCatalogService.checkCoverage(...)` 已支持：
+  - activity slot coverage
+  - lunch slot coverage
+  - dinner slot coverage
+  - hard gaps
+  - soft gaps
+
+当前判断规则：
+
+```text
+availableCandidateCount < requiredUsageCount
+-> hard gap, generatable=false
+
+requiredUsageCount <= availableCandidateCount < preferredCandidateCount
+-> soft gap, generatable=true, preferredCoverageMet=false
+
+availableCandidateCount >= preferredCandidateCount
+-> sufficient
+```
+
+当前实现边界：
+- hard gap 目前只记录和打日志，不阻断首屏，这是过渡状态。
+- 不调用外部地点 API。
+- 不做 fallback zone resolution。
+- 不修改 candidate pool。
+- 当前 `buildCandidatePool` 在 coverage 前被复用为数据读取手段，语义上应改成 `buildCoverageInventory` 或 `buildPreliminaryCandidateView`。
+
+后续必须调整：
+- 新增 `CatalogInventory` 或 `CoverageInventory`。
+- `checkCoverage(...)` 输入从 final candidate pool 改成 request-scoped coverage view。
+- Hard Gap 处理顺序：
+  - fallback Zone
+  - 同城可行 Zone
+  - gap-driven 外部 API 补充
+  - 降低非必要 slot
+  - 仍不足则返回 partial/warning 或明确失败
+- Soft Gap 允许缩小备用候选池并继续生成。
+
+---
+
+## 阶段 5：修正 GenerateInitialPlanUseCase 的本地化前半链路（complete，需后续语义重命名）
+
+目标：
+- local-fast 分支先按 1.txt 的顺序执行 zone/skeleton/coverage，再进入 scheduler。
+- 修正概念顺序：Coverage 前不构建最终 Candidate Pool。
+
+当前已完成的过渡编排：
+
+```text
+TripPlanningSpecification
+-> DestinationCatalog.findAvailableZones
+-> DestinationCatalog.buildTripSkeleton
+-> DestinationCatalog.buildCandidatePool
+-> DestinationCatalog.checkCoverage
+-> ItineraryGenerator.generate
+-> PlanQualityService.diagnose
+-> PlanDraftResponse
+```
+
+当前实现边界：
+- `findAvailableZones` 的结果目前用于可观测和后续扩展，不直接进入 Agent。
+- `coverage` 只打日志，不阻断。
+- `ItineraryGenerator.generate(spec, pool)` 保持旧签名调用，避免破坏现有 mock 测试。
+- 真实 `LocalPlanGeneratorService` 内部会通过 `DestinationCatalog.buildTripSkeleton(...)` 获取 skeleton。
+- 这里的 `buildCandidatePool` 在 Coverage 前使用是临时实现，语义不准确。
+
+目标编排应调整为：
+
+```text
+TripPlanningSpecification
+-> TripSkeleton
+-> CatalogInventory / Coverage View
+-> Coverage Check
+-> Coverage Gap Resolution
+-> Final Candidate Pool
+-> Scheduler
+```
+
+后续必须调整：
+- 拆出 `buildCoverageInventory(...)` 或 `buildPreliminaryCandidateView(...)`。
+- Coverage Resolution 后再构建 Final Candidate Pool。
+- 把 skeleton 显式传入 scheduler。
+- 让 scheduler 真正按 slot 填充 POI。
+
+---
+
+## 阶段 6：让 LocalPlanGeneratorService 开始消费 Skeleton / Zone（complete）
+
+目标：
+- 在不重写 scheduler 的前提下，让 skeleton 的 zoneId 影响现有 area rotation。
+
+已完成内容：
+- `ItineraryGenerator` 增加带 `TripSkeleton` 的默认重载。
+- `LocalPlanGeneratorService.generate(spec, pool)` 会内部构建 skeleton。
+- `LocalPlanGeneratorService` 会把 skeleton day zoneId 映射回 catalogue area。
+- 如果 skeleton 没有可用 zone，则回退到旧 area rotation。
+
+当前实现边界：
+- 仍然不是真正的 slot filling scheduler。
+- meal selection 仍然沿用现有 attraction-nearby scoring。
+- skeleton 只影响每日 anchor area 选择。
+
+后续可演进：
+- 改成 `TripSlot -> PlaceCandidate` 的显式填槽。
+- activity/lunch/dinner 分别按 slot capability 选点。
+- 每天可按 primaryZone + fallbackZone 做局部修复。
+
+---
+
+## 阶段 7：Destination Resolver（complete）
+
+目标：
+- 把用户目的地转换为稳定内部 destination 标识。
+- Zone retrieval 之前必须先确定 destination。
+- 保留一个很轻的 request normalization，但不要让模型自由猜目的地。
+
+建议新增：
+
+```text
+catalog/domain/Destination.java
+catalog/application/DestinationResolver.java
+catalog/local/StaticDestinationResolver.java
+```
+
+输出建议：
+
+```java
+record Destination(
+    String destinationId,
+    String city,
+    String state,
+    String country,
+    String timezone
+) {}
+```
+
+第一版规则：
+- Brisbane / brisbane / 布里斯班 -> `AU-QLD-BRISBANE`
+- Testville -> test fixture destination
+- unsupported city -> 返回 unresolved 或保留当前 empty catalog 行为
+
+需要改造：
+- `TripPlanningSpecification.Destination` 从只有 `city` 扩展为 destinationId/city/state/country/timezone。
+- `LocalPoiCatalogService` 读取 catalogue 时使用 city 兼容旧资源文件。
+
+已完成内容：
+- 新增 `thesis.project.gu.catalog.domain.Destination`。
+- 新增 `thesis.project.gu.catalog.application.DestinationResolver`。
+- 新增 `thesis.project.gu.catalog.local.StaticDestinationResolver`。
+- `StaticDestinationResolver` 已支持：
+  - Brisbane / bne / 布里斯班 -> `AU-QLD-BRISBANE`
+  - Testville -> `TEST-TESTVILLE`
+  - unsupported city -> unresolved destination，保留原始显示名
+- `TripPlanningSpecification.Destination` 已扩展为：
+  - destinationId
+  - city
+  - state
+  - country
+  - timezone
+  - resolved
+- 保留 `new TripPlanningSpecification.Destination(city)` 兼容旧调用。
+- 新增 `TripPlanningSpecification.withResolvedDestination(...)`。
+- `GenerateInitialPlanUseCase` local-fast 分支已在 zone/skeleton/coverage 前执行 destination resolve。
+- `LocalPoiCatalogService` 仍用 resolved city 读取本地 catalogue，兼容现有资源文件。
+
+当前实现边界：
+- Resolver 仍是静态规则，不做拼写纠错、行政区歧义消解或外部地理编码。
+- unsupported city 仍保持当前 empty catalog 行为。
+- AI-first legacy path 暂未强制使用 resolver。
+
+验证：
+```powershell
+.\mvnw.cmd -q -DskipTests compile
+.\mvnw.cmd -q "-Dtest=StaticDestinationResolverTest,PlanningDomainBoundaryTest,LocalPoiCatalogServiceTest,LocalPlanGeneratorServiceTest" test
+.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test
+```
+
+---
+
+## 阶段 8：Lightweight Request Pre-parser（complete）
+
+目标：
+- 在不调用 LLM 的情况下，从 request 中抽取确定性强的基础参数和简单 hints。
+- 结构化字段优先于自然语言推断。
+
+建议新增：
+
+```text
+planning/application/LightweightRequestPreParser.java
+planning/domain/ParsedPlanningRequest.java
+```
+
+输入：
+- `CreatePlanReq`
+- 未来可能增加的 `naturalLanguageRequest`
+
+输出建议：
+- destinationCandidate
+- daysCandidate
+- travellers
+- pace
+- budget
+- specialDayHints
+- lateStartPreferred
+- preferIndoorWhenRaining
+- rawText
+
+实现步骤：
+1. 保持结构化字段优先于自然语言推断。
+2. 从 `CreatePlanReq` 生成 `ParsedPlanningRequest`。
+3. 增加简单规则：
+   - relaxed pace -> lateStartPreferred
+   - kids > 0 -> familyFriendly
+   - style 中含 culture/nature/shopping/theme_park -> preference hints
+4. 如果后续 DTO 增加 raw text，再解析“第 N 天”“生日”“下雨”“不想早起”。
+
+完成后链路：
+
+```text
+CreatePlanReq
+-> LightweightRequestPreParser / Request normalization
+-> DestinationResolver
+```
+
+已完成内容：
+- 新增 `thesis.project.gu.planning.domain.ParsedPlanningRequest`。
+- 新增 `thesis.project.gu.planning.application.LightweightRequestPreParser`。
+- Parser 当前从 `CreatePlanReq` 提取：
+  - destinationCandidate
+  - daysCandidate
+  - travellers
+  - pace
+  - budget
+  - preferenceHints
+  - specialDayHints
+  - lateStartPreferred
+  - familyFriendly
+  - preferIndoorWhenRaining
+  - rawText
+- 支持确定性规则：
+  - relaxed pace -> lateStartPreferred
+  - kids > 0 -> familyFriendly
+  - culture / market_shopping / theme_park / food / rainy-day 等 style -> preference hints
+- `GenerateInitialPlanUseCase` local-fast 分支已在 DestinationResolver 前执行 parser。
+- DestinationResolver 使用 `ParsedPlanningRequest.destinationCandidate()`。
+
+当前实现边界：
+- `CreatePlanReq` 暂无 naturalLanguageRequest 字段，因此 rawText 当前为 null。
+- 不解析“第 N 天”“生日”“下雨”“不想早起”等自然语言表达。
+- Parser 只做确定性轻量 hints，不调用 LLM。
+
+验证：
+```powershell
+.\mvnw.cmd -q -DskipTests compile
+.\mvnw.cmd -q "-Dtest=LightweightRequestPreParserTest,StaticDestinationResolverTest,PlanningDomainBoundaryTest,LocalPoiCatalogServiceTest,LocalPlanGeneratorServiceTest" test
+.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test
+```
+
+---
+
+## 阶段 9：Retrieval Query Builder（complete）
+
+目标：
+- 为 Structured / Hybrid Planning Zone Retrieval 准备统一 query 对象。
+- 第一版不做向量，只生成 structured filters 和 hints。
+
+建议新增：
+
+```text
+planning/domain/PlanningZoneRetrievalQuery.java
+planning/application/RetrievalQueryBuilder.java
+```
+
+输出建议：
+- destinationId
+- activeOnly
+- minimumAllocation
+- semanticQuery
+- detectedHints
+- preferredStyles
+- pace
+- travellers
+
+第一版实现：
+- semanticQuery 可以由 rawText + styles + pace 拼接。
+- structured filters 用 destination + active + minimumAllocation。
+- detectedHints 来自 pre-parser。
+
+已完成内容：
+- 新增 `thesis.project.gu.planning.domain.PlanningZoneRetrievalQuery`。
+- 新增 `thesis.project.gu.planning.application.RetrievalQueryBuilder`。
+- Query Builder 当前输出：
+  - destinationId
+  - destinationCity
+  - activeOnly
+  - minimumAllocation
+  - semanticQuery
+  - detectedHints
+  - preferredStyles
+  - pace
+  - travellers
+- `GenerateInitialPlanUseCase` local-fast 分支已在 DestinationResolver 后构建 retrieval query。
+- 当前 query 只用于 debug trace 和阶段 10 接入准备，不改变现有 zone retrieval 行为。
+
+当前实现边界：
+- 不做向量召回。
+- 不做 structured filtering。
+- 不做 business rerank。
+- `semanticQuery` 只由 rawText、style hints、pace、family/late-start/indoor hints 拼接。
+
+验证：
+```powershell
+.\mvnw.cmd -q -DskipTests compile
+.\mvnw.cmd -q "-Dtest=RetrievalQueryBuilderTest,LightweightRequestPreParserTest,StaticDestinationResolverTest,PlanningDomainBoundaryTest,LocalPoiCatalogServiceTest,LocalPlanGeneratorServiceTest" test
+.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test
+```
+
+---
+
+## 阶段 10：Structured Planning Zone Retrieval，暂不称为 Hybrid RAG（complete）
+
+目标：
+- 先实现 structured filtering + business rerank。
+- 在没有 semanticProfile、embedding、vector store、Top-K 语义召回之前，不命名为 Hybrid RAG。
+
+建议新增：
+
+```text
+catalog/application/PlanningZoneRetrievalService.java
+catalog/application/LocalPlanningZoneRetrievalService.java
+```
+
+输入：
+- `PlanningZoneRetrievalQuery`
+- `DestinationCatalog.findAvailableZones(...)`
+
+输出：
+- semanticCandidates
+- feasibilityFallbackCandidates
+
+第一版评分：
+
+```text
+score =
+    capabilityMatch
+  + capacityScore
+  + poiCoverageScore
+  + mealSupport
+  + familySupport
+  + styleTagMatch
+```
+
+暂不实现：
+- embedding
+- vector DB
+- semantic similarity
+- stale data scoring
+
+运行模式建议：
+- 当前阶段：`ZONE_GUIDED_LOCAL_FIRST`
+- 完成 structured filtering + rerank 后：`STRUCTURED_RETRIEVAL_LOCAL_FIRST`
+- 完成 embedding + vector store + business rerank 后：`HYBRID_RAG_GUIDED_LOCAL_FIRST`
+
+已完成内容：
+- 新增 `thesis.project.gu.catalog.application.PlanningZoneRetrievalService`。
+- 新增 `thesis.project.gu.catalog.application.LocalPlanningZoneRetrievalService`。
+- 新增 `thesis.project.gu.catalog.domain.PlanningZoneRetrievalResult`。
+- `LocalPlanningZoneRetrievalService` 当前执行：
+  - destination city structured filter
+  - minimum allocation filter
+  - capability / capacity / meal / family / indoor support scoring
+  - preferred style / theme match scoring
+  - semanticCandidates 与 feasibilityFallbackCandidates 分组
+- `GenerateInitialPlanUseCase` local-fast 分支已调用 structured retrieval service。
+- 当前 retrieval result 已用于排序、分组、debug trace，并作为 ordered zones 输入 `buildTripSkeleton(specification, orderedZones)`。
+- `GenerateInitialPlanUseCase` 已把 ordered-zone skeleton 显式传给 `ItineraryGenerator.generate(specification, candidatePool, skeleton)`。
+
+当前实现边界：
+- 不做 embedding。
+- 不做 vector DB。
+- 不做真正 semantic similarity。
+- 不做 stale data scoring。
+- Skeleton 已消费 structured retrieval 排序，但还没有通过 PlanningAgent / DayStrategy 做高级 day-level 规划。
+- Coverage 仍使用 preliminary candidate pool，尚未拆分 request-scoped CoverageInventory。
+
+验证：
+```powershell
+.\mvnw.cmd -q -DskipTests compile
+.\mvnw.cmd -q "-Dtest=LocalPlanningZoneRetrievalServiceTest,RetrievalQueryBuilderTest,LightweightRequestPreParserTest,StaticDestinationResolverTest,PlanningDomainBoundaryTest,LocalPoiCatalogServiceTest,LocalPlanGeneratorServiceTest" test
+.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test
+```
+
+---
+
+## 阶段 11：拆分静态 Zone Snapshot 与请求级 Available Zone Summary
+
+目标：
+- 避免把静态 POI 总数误当成本次请求下可用数量。
+- 给 Planning Agent 提供真正 request-scoped 的能力摘要。
+
+建议新增静态 snapshot：
+
+```java
+record PlanningZoneSnapshot(
+    String zoneId,
+    String zoneType,
+    List<String> themes,
+    List<String> anchorPoiIds,
+    int totalAttractionCount,
+    int totalRestaurantCount,
+    String semanticProfile,
+    String snapshotVersion,
+    String generatedAt
+) {}
+```
+
+建议新增请求级 summary：
+
+```java
+record AvailableZoneSummary(
+    String zoneId,
+    int availableAttractionCount,
+    int availableIndoorCount,
+    int availableFamilyCount,
+    int availableLunchCount,
+    int availableDinnerCount,
+    int requestScopedCapacity,
+    String freshnessStatus
+) {}
+```
+
+动态过滤条件：
+- 旅行日期
+- 营业时间
+- 预算
+- 儿童和老人
+- pace
+- 室内外偏好
+- 数据新鲜度
+
+完成后：
+- Agent 和 Coverage 使用 `AvailableZoneSummary`。
+- Snapshot 只作为稳定事实和离线索引来源。
+
+---
+
+## 阶段 12：Zone Context Builder
+
+目标：
+- 把候选 Zone 转成 Planning Agent 可读的紧凑能力上下文。
+- 不暴露完整 POI 列表给模型。
+
+建议新增：
+
+```text
+planning/domain/ZoneContext.java
+planning/application/ZoneContextBuilder.java
+```
+
+输入：
+- selected `AvailableZoneSummary`
+- selected `PlanningZoneSnapshot`
+
+输出：
+- zoneId
+- name
+- zoneType
+- themes
+- availablePoiCounts
+- mealSupport
+- capacity
+- weatherSuitability
+- recommendedAllocation
+- dataFreshness
+
+第一版：
+- 从现有 `ZoneCapabilitySummary` 临时映射。
+- `weatherSuitability` 可以先用 indoor style/category 的启发式估计。
+
+---
+
+## 阶段 13：Planning Agent 接口 + LocalFallbackPlanningAgent
+
+目标：
+- 先定义 Agent 边界，但不马上依赖 LLM。
+- 本地 fallback 可以根据 Top-K zones + days + pace 生成 dayStrategies。
+
+建议新增：
+
+```text
+planning/application/PlanningAgent.java
+planning/application/LocalFallbackPlanningAgent.java
+planning/domain/PlanningAgentInput.java
+planning/domain/PlanningAgentOutput.java
+```
+
+Agent 输出映射到：
+- normalizedConstraints
+- specialEvents
+- dayStrategies
+
+第一版：
+- `LocalFallbackPlanningAgent` 按 zone ranking 轮转生成 `DayStrategy`。
+- 如果 pre-parser 识别 birthday，则把 birthday day strategy 放到 meal/culture 支撑更好的 zone。
+
+后续：
+- 在 DestinationResolver、RetrievalQueryBuilder、Structured Zone Retrieval、ZoneContextBuilder、PlanningAgent 接口、SpecificationValidator 完成后，可以接真实 Single Planning Agent。
+- 不必等完整 slot filling 和向量数据库都完成后才接模型。
+
+---
+
+## 阶段 14：Planning Specification Validator
+
+目标：
+- 对 Agent 或 fallback 生成的 `TripPlanningSpecification` 做确定性校验。
+
+建议新增：
+
+```text
+planning/application/PlanningSpecificationValidator.java
+planning/domain/SpecificationValidationResult.java
+```
+
+校验项：
+- days 是否匹配 request。
+- dayStrategies 数量是否匹配 days。
+- primaryZoneId 是否来自合法候选集。
+- fallbackZoneIds 是否合法。
+- birthday day 是否落在正确 day。
+- allocation 是否合理。
+- 是否连续多天重复同一 zone。
+
+修复优先级：
+1. 字段级修复。
+2. 删除非法字段。
+3. 使用 Agent fallback zone。
+4. 使用同城合法 zone。
+5. 最多一次重新规划。
+
+---
+
+## 阶段 15：TripSkeleton 根据 DayStrategy 生成真实 slots
+
+目标：
+- 从当前 pace-only skeleton，升级为 dayStrategy-aware skeleton。
+
+需要支持：
+- primaryZoneId
+- fallbackZoneIds
+- allocation
+- preferredPoiTypes
+- requiredCapabilities
+- specialEvents
+- lateStart
+- indoor/rain fallback
+
+输出要求：
+- 每天明确需要多少 activity/lunch/dinner/special event slots。
+- 每个 slot 有 zoneId、slotType、requiredCapabilities、preferredDurationMinutes、preferredTimeWindow。
+- Skeleton 仍然不选择最终 POI。
+
+---
+
+## 阶段 16：Request-scoped Coverage Check
+
+目标：
+- Coverage 使用 request-scoped inventory，而不是 final candidate pool。
+- Coverage 基于 TripSkeleton 检查本地真实 POI 是否能填满 slots。
+
+建议新增：
+
+```text
+catalog/domain/CatalogInventory.java
+catalog/domain/CoverageInventory.java
+catalog/application/CoverageInventoryBuilder.java
+```
+
+输入：
+- TripPlanningSpecification
+- TripSkeleton
+- AvailableZoneSummary
+
+输出：
+- 每个 day/zone/slotType/capability 的可用候选数量。
+- Hard Gap 和 Soft Gap。
+
+---
+
+## 阶段 17：Coverage Gap Resolution
+
+目标：
+- 把当前只记录 coverage gap，升级为确定性降级和补救。
+- Hard Gap 不应无条件继续进入 Scheduler。
+
+建议新增：
+
+```text
+catalog/application/CoverageGapResolutionService.java
+catalog/domain/CoverageResolutionResult.java
+```
+
+处理顺序：
+1. primary zone 不足。
+2. 尝试 dayStrategy fallback zone。
+3. 尝试同城其他 capability 足够的 zone。
+4. 如果只是 soft gap，继续生成但标记 reduced fallback margin。
+5. 如果 hard gap 仍存在，gap-driven 调外部地点 API。
+6. 如果仍不足，降低非必要 slot。
+7. 仍不足则返回 partial/warning 或明确失败。
+
+第一版先做：
+- fallback zone。
+- 同城 meal/activity capable zone。
+- 不接外部 API。
+
+完成后链路：
+
+```text
+TripSkeleton
+-> CoverageInventory
+-> checkCoverage
+-> resolveCoverageGaps
+-> Final CandidatePool
+```
+
+---
+
+## 阶段 18：ZoneType-specific CoverageStrategy
+
+目标：
+- 不同 ZoneType 使用不同覆盖规则。
+- 大型景点不能统一要求 3 个 activity POI。
+
+建议新增：
+
+```java
+public interface ZoneCoverageStrategy {
+    CoverageResult check(
+        PlanningZone zone,
+        TripSkeleton.DaySkeleton day,
+        CatalogInventory inventory
+    );
+}
+```
+
+实现：
+
+```text
+UrbanDistrictCoverageStrategy
+MajorLandmarkCoverageStrategy
+RemoteDayTripCoverageStrategy
+NatureAreaCoverageStrategy
+```
+
+大型景点重点检查：
+- Anchor POI 是否有效。
+- 推荐停留时间。
+- 往返交通时间。
+- 餐饮支持。
+- 天气适配。
+- 体力要求。
+- 是否允许组合其他 Zone。
+
+---
+
+## 阶段 19：Gap-driven External POI Enrichment
+
+目标：
+- 只有本地真实候选连实际 slot 都无法填满时，才调用外部地点 API。
+- 调用必须由明确 CoverageGap 驱动。
+
+输入示例：
+
+```text
+zoneId = south-bank
+day = 3
+slotType = DINNER
+requiredCapabilities = birthday-suitable
+missingCount = 1
+```
+
+外部 API 查询只补缺口：
+- zone + category
+- capability
+- budget
+- meal type
+- operating status
+
+返回数据必须经过：
+- 标准化
+- 去重
+- 坐标校验
+- Zone 归属判断
+- 类型映射
+- 营业状态检查
+- 数据可信度计算
+- 缓存或持久化
+
+---
+
+## 阶段 20：Final Candidate Pool
+
+目标：
+- Coverage Resolution 后再构建最终给 Scheduler 使用的候选池。
+- 避免 coverage 前构建的临时数据被误认为最终候选。
+
+Final Candidate Pool 应包含：
+- 已解析后的 dayStrategies。
+- 已修复后的 skeleton。
+- primary/fallback zone 决策结果。
+- 本地候选。
+- gap-driven enriched candidates。
+- request-scoped filtering 结果。
+
+建议：
+- 保留现有 `PlaceCandidatePool` 作为第一版输出。
+- 后续升级为 day/slot scoped candidate pool，例如：
+
+```java
+record SlotCandidatePool(
+    String slotId,
+    List<PlaceCandidate> candidates
+) {}
+```
+
+---
+
+## 阶段 21：Local-first Scheduler 显式 Slot Filling
+
+目标：
+- 从当前 area-aware scheduler 迁移到 skeleton slot filling。
+
+建议改造：
+- `ItineraryGenerator.generate(spec, pool, skeleton)` 成为主调用。
+- `LocalPlanGeneratorService` 内部新增：
+  - `fillActivitySlot`
+  - `fillMealSlot`
+  - `scoreCandidateForSlot`
+  - `orderDayStops`
+  - `scheduleSlotTimes`
+
+评分维度：
+
+```text
+poiScore =
+    zoneMatch
+  + themeMatch
+  + userPreferenceMatch
+  + slotCapabilityMatch
+  + poiPriority
+  + specialEventSuitability
+  + indoorOutdoorSuitability
+  + mealSuitability
+  + dataConfidence
+  - duplicatePenalty
+  - estimatedDistancePenalty
+  - crossZonePenalty
+  - openingHourRisk
+```
+
+迁移方式：
+1. 先让 activity slot 使用现有 attraction scoring。
+2. 再让 meal slot 使用现有 restaurant scoring。
+3. 最后把 day order/time calculation 从旧 `scheduleDayStops` 拆开。
+
+---
+
+## 阶段 22：首屏本地距离估算
+
+目标：
+- 首屏不等精确路线 API。
+- Scheduler 用 haversine + 经验系数估算通勤。
+
+当前已有：
+- `LocalPlanGeneratorService` 内已有 haversine distance 和 transferMinutes。
+
+后续改造：
+
+```text
+routing/application/LocalRouteEstimateService.java
+routing/domain/EstimatedRouteSegment.java
+```
+
+要求：
+- PlanDraft 或 response metadata 标记 `routeStatus=ESTIMATED`。
+- 精确路线异步修正。
+- 精确路线修复只能调整受影响的 DayPlan，不能默认重新生成整个计划。
+
+---
+
+## 阶段 23：Deterministic Quality Validator / Local Repair 接入新 skeleton
+
+目标：
+- 让质量校验和修复知道 skeleton / slot requirements。
+
+当前已有：
+- `DefaultPlanQualityService`
+- `DraftValidationService`
+- `DeterministicPlanRepairService`
+- `MealTimeWindowRepairService`
+- `RouteAwareScheduleRepairService`
+- `PostRoutePlanRepairService`
+
+后续改造：
+- validation result 增加 slot-level issue。
+- repair 时优先替换同 zone 同 slot candidate。
+- fallback zone repair 接入 `CoverageGapResolutionService`。
+- 不再让修复逻辑回到 PlanProcessorService。
+
+---
+
+## 阶段 24：首屏结构化响应状态字段
+
+目标：
+- 对齐 `1.txt` 示例，但命名不能超前。
+
+建议第一版：
+
+```json
+{
+  "planStatus": "READY",
+  "planningMode": "ZONE_GUIDED_LOCAL_FIRST",
+  "routeStatus": "ESTIMATED",
+  "catalogStatus": "SUFFICIENT",
+  "copyStatus": "BASIC",
+  "enhancementStatus": "PENDING",
+  "warnings": []
+}
+```
+
+只有完成 embedding + vector store + Top-K semantic recall + business rerank 后，才改成：
+
+```text
+HYBRID_RAG_GUIDED_LOCAL_FIRST
+```
+
+建议：
+- 不急着破坏前端 DTO。
+- 可先在 `PlanDraft` 或 response metadata 中加兼容字段。
+- warnings 从 coverage/quality/route repair 汇总。
+
+---
+
+## 阶段 25：版本字段与一致性控制
+
+目标：
+- 防止 Agent 使用旧 Zone Snapshot 规划，而 Scheduler 使用新 Catalog。
+- 防止异步 PlanPatch 覆盖用户已更新的计划。
+
+建议新增：
+
+```java
+record PlanningContextVersion(
+    String catalogVersion,
+    String zoneSnapshotVersion,
+    String semanticProfileVersion,
+    String embeddingVersion,
+    String planningPromptVersion,
+    String planningSpecificationVersion
+) {}
+```
+
+需要版本字段：
+- catalogVersion
+- zoneSnapshotVersion
+- semanticProfileVersion
+- embeddingVersion
+- planningPromptVersion
+- planningSpecificationVersion
+- planVersion
+- basePlanVersion
+
+应用点：
+- Planning Agent input。
+- Zone retrieval result。
+- Coverage inventory。
+- Final Candidate Pool。
+- PlanPatch。
+- 异步 route/copy/semantic review。
+
+---
+
+## 阶段 26：Agent 与流水线可观测性 / 评估
+
+目标：
+- 能解释每次计划为什么这样生成。
+- 为论文实验和系统调试提供 trace。
+
+建议记录指标：
+
+```text
+requestId
+planningMode
+retrievalCandidates
+retrievalScores
+selectedZones
+planningAgentLatency
+planningAgentTokens
+planningFallbackUsed
+coverageHardGapCount
+coverageSoftGapCount
+externalPoiApiCalls
+schedulerLatency
+repairRounds
+qualityScore
+totalLatency
+```
+
+建议保存关键快照：
+
+```text
+原始请求
+-> Pre-parser 结果
+-> Destination Resolver 结果
+-> Retrieval Query
+-> Top-K Zone
+-> Zone Context
+-> Agent 输出
+-> Validator 修复
+-> Trip Skeleton
+-> Coverage Gap
+-> Coverage Resolution
+-> Final Candidate Pool 摘要
+-> 最终计划
+```
+
+用途：
+- 解释为什么选某个 zone。
+- 解释为什么回退到另一个 zone。
+- 解释为什么调用外部地点 API。
+- 找出延迟瓶颈。
+- 评估 Agent 是否真的提升质量。
+
+---
+
+## 阶段 27：异步增强事件化
+
+目标：
+- 首屏返回后，再做非关键增强。
+
+建议新增事件：
+
+```text
+PlanDraftGeneratedEvent
+```
+
+监听器：
+- Copy polish。
+- Precise route calculation。
+- Catalog enrichment。
+- Optional semantic review。
+
+当前已有：
+- 前端传 `X-Defer-Copy-Polish: true`。
+- copy polish 已能延后。
+
+后续：
+- 从直接调用演进到应用内事件。
+- 再按需要演进到 MQ / worker。
+- 精确路线差异超过阈值时只生成局部 PlanPatch。
+
+---
+
+## 阶段 28：接入真实 Single Planning Agent
+
+目标：
+- 在结构化检索、ZoneContext、Agent 接口、SpecificationValidator 完成后接真实 DeepSeek-v4-pro Planning Agent。
+- 不必等完整向量库或完整 slot filling 全部完成。
+- 第一版只接单个受控 Planning Agent；动态重规划阶段再引入 Spring AI Alibaba Graph / ParallelAgent。
+
+建议实现：
+
+```text
+planning/application/PlanningModel.java
+planning/infrastructure/deepseek/DeepSeekPlanningModelAdapter.java
+planning/application/DeepSeekPlanningAgent.java
+```
+
+如果引入 Spring AI Alibaba：
+- Spring AI Alibaba 负责 Agent / workflow 编排。
+- Spring AI 负责 ChatClient、tool calling、structured output、observability。
+- DeepSeek adapter 负责模型提供方细节。
+- 业务层仍只依赖 `PlanningAgent` / `PlanningModel` 接口。
+
+输入：
+- raw request
+- resolved destination
+- parsed hints
+- selected zone context
+- supported constraint schema
+
+输出：
+- normalizedConstraints
+- specialEvents
+- dayStrategies
+
+约束：
+- Agent 不输出具体 POI。
+- Agent 不决定最终路线。
+- Agent 不绕过 Coverage / Scheduler / Validator。
+- Agent 超时或失败时使用 `LocalFallbackPlanningAgent`。
+- DeepSeek-v4-pro 输出必须经过 schema parsing 和 `PlanningSpecificationValidator`。
+- 模型调用失败、超时或 schema 不合法时，必须降级到 local fallback。
+
+---
+
+## 阶段 29：semanticProfile + Embedding + Vector Store
+
+目标：
+- 从 Structured Retrieval 升级到真正 Hybrid RAG。
+
+顺序：
+1. 给 PlanningZoneSnapshot 增加 semanticProfile。
+2. 离线生成 embedding。
+3. 接 vector store。
+4. Query embedding。
+5. Top-K semantic recall。
+6. Business rerank。
+7. 输出 semanticCandidates + feasibilityFallbackCandidates。
+
+完成条件：
+- 有 semanticProfile。
+- 有 embeddingVersion。
+- 有 vector index。
+- 有 Top-K recall trace。
+- 有 business rerank score。
+
+完成后才可以把 planningMode 升级为：
+
+```text
+HYBRID_RAG_GUIDED_LOCAL_FIRST
+```
+
+---
+
+## 阶段 30：动态多 Agent Replanning
+
+目标：
+- 作为后期能力，不进入当前主线。
+
+适用场景：
+- 用户编辑计划后局部重规划。
+- 精确路线结果导致某天不可执行。
+- 天气或营业时间变化影响原计划。
+- 多城市、多约束复杂计划。
+
+约束：
+- 默认生成局部 PlanPatch。
+- 必须带 basePlanVersion。
+- 不默认重生成整个计划。
+
+---
+
+## 当前本轮实现摘要（complete）
+
+本轮已经实现的是 `1.txt` 最终链路中的本地化前半段骨架：
+
+```text
+TripPlanningSpecification 扩展
+-> Lightweight Request Pre-parser
+-> Destination Resolver
+-> Retrieval Query Builder
+-> Structured Planning Zone Retrieval
+-> Static Zone Summary
+-> TripSkeleton
+-> Minimum Catalog Coverage Check
+-> Local-first Scheduler 低风险接入 Skeleton Zone
+```
+
+具体文件：
+- `src/main/java/thesis/project/gu/planning/domain/TripPlanningSpecification.java`
+- `src/main/java/thesis/project/gu/planning/domain/ParsedPlanningRequest.java`
+- `src/main/java/thesis/project/gu/planning/domain/PlanningZoneRetrievalQuery.java`
+- `src/main/java/thesis/project/gu/planning/domain/TripSkeleton.java`
+- `src/main/java/thesis/project/gu/planning/domain/TripSlot.java`
+- `src/main/java/thesis/project/gu/catalog/domain/PlanningZone.java`
+- `src/main/java/thesis/project/gu/catalog/domain/PlanningZoneSummary.java`
+- `src/main/java/thesis/project/gu/catalog/domain/ZoneCapabilitySummary.java`
+- `src/main/java/thesis/project/gu/catalog/domain/CoverageResult.java`
+- `src/main/java/thesis/project/gu/catalog/domain/CoverageGap.java`
+- `src/main/java/thesis/project/gu/catalog/domain/Destination.java`
+- `src/main/java/thesis/project/gu/catalog/domain/PlanningZoneRetrievalResult.java`
+- `src/main/java/thesis/project/gu/catalog/application/DestinationResolver.java`
+- `src/main/java/thesis/project/gu/catalog/application/DestinationCatalog.java`
+- `src/main/java/thesis/project/gu/catalog/application/PlanningZoneRetrievalService.java`
+- `src/main/java/thesis/project/gu/catalog/application/LocalPlanningZoneRetrievalService.java`
+- `src/main/java/thesis/project/gu/catalog/local/StaticDestinationResolver.java`
+- `src/main/java/thesis/project/gu/catalog/local/LocalPoiCatalogService.java`
+- `src/main/java/thesis/project/gu/planning/application/LightweightRequestPreParser.java`
+- `src/main/java/thesis/project/gu/planning/application/RetrievalQueryBuilder.java`
+- `src/main/java/thesis/project/gu/planning/application/GenerateInitialPlanUseCase.java`
+- `src/main/java/thesis/project/gu/planning/application/ItineraryGenerator.java`
+- `src/main/java/thesis/project/gu/planning/localfast/LocalPlanGeneratorService.java`
+- `src/test/java/thesis/project/gu/service/LocalPoiCatalogServiceTest.java`
+- `src/test/java/thesis/project/gu/service/StaticDestinationResolverTest.java`
+- `src/test/java/thesis/project/gu/service/LightweightRequestPreParserTest.java`
+- `src/test/java/thesis/project/gu/service/RetrievalQueryBuilderTest.java`
+- `src/test/java/thesis/project/gu/service/LocalPlanningZoneRetrievalServiceTest.java`
+
+本轮没有实现：
+- AvailableZoneSummary / request-scoped coverage inventory。
+- Zone Context Builder。
+- Single Planning Agent。
+- Planning Specification Validator。
+- Coverage Gap Resolution。
+- ZoneType-specific CoverageStrategy。
+- Gap-driven External POI Enrichment。
+- Final Candidate Pool。
+- 真正的 slot filling scheduler。
+- 异步 precise route patch。
+- 版本字段与 trace 体系。
+
+下一步建议优先做：
+1. `AvailableZoneSummary` / `CoverageInventory`，把 Coverage 和 Final Candidate Pool 分离。
+2. `LocalFallbackPlanningAgent` + `PlanningSpecificationValidator`。
+3. `CoverageGapResolutionService`，先做 fallback zone 和同城可行 zone。

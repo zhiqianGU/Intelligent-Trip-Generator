@@ -1,11 +1,15 @@
 package thesis.project.gu.planning.localfast;
 
 import org.springframework.stereotype.Service;
-import thesis.project.gu.catalog.local.LocalPoiCatalog;
-import thesis.project.gu.catalog.local.LocalPoiCatalogService;
-import thesis.project.gu.catalog.local.LocalPoiItem;
+import thesis.project.gu.catalog.application.DestinationCatalog;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.planning.application.ItineraryGenerator;
+import thesis.project.gu.planning.domain.PlaceCandidate;
+import thesis.project.gu.planning.domain.PlaceCandidatePool;
+import thesis.project.gu.planning.domain.PlanDraft;
+import thesis.project.gu.planning.domain.TripSkeleton;
+import thesis.project.gu.planning.domain.TripPlanningSpecification;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -20,7 +24,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
-public class LocalPlanGeneratorService {
+public class LocalPlanGeneratorService implements ItineraryGenerator {
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
     private static final int DAY_START_MINUTES = 9 * 60;
     private static final int LUNCH_START_MINUTES = 12 * 60 + 15;
@@ -30,31 +34,50 @@ public class LocalPlanGeneratorService {
     private static final int TRANSFER_MINUTES = 20;
     private static final double MEAL_HARD_DISTANCE_KM = 5.0;
 
-    private final LocalPoiCatalogService catalogService;
+    private final DestinationCatalog catalogService;
 
-    public LocalPlanGeneratorService(LocalPoiCatalogService catalogService) {
+    public LocalPlanGeneratorService(DestinationCatalog catalogService) {
         this.catalogService = catalogService;
     }
 
     public PlanDraftResponse generate(CreatePlanReq req) {
-        LocalPoiCatalog catalog = catalogService.catalogForCity(req == null ? null : req.city());
-        if (catalog.totalItemCount() == 0) {
+        TripPlanningSpecification specification = TripPlanningSpecification.fromRequest(req);
+        return generateDraft(req, catalogService.buildCandidatePool(specification), null).toResponse();
+    }
+
+    @Override
+    public PlanDraft generate(TripPlanningSpecification specification, PlaceCandidatePool candidatePool) {
+        return generate(specification, candidatePool, catalogService.buildTripSkeleton(specification));
+    }
+
+    @Override
+    public PlanDraft generate(TripPlanningSpecification specification, PlaceCandidatePool candidatePool, TripSkeleton skeleton) {
+        CreatePlanReq req = specification == null ? null : specification.toRequest();
+        PlaceCandidatePool effectivePool = candidatePool == null
+                ? catalogService.buildCandidatePool(specification)
+                : candidatePool;
+        return generateDraft(req, effectivePool, skeleton);
+    }
+
+    private PlanDraft generateDraft(CreatePlanReq req, PlaceCandidatePool candidatePool, TripSkeleton skeleton) {
+        PlaceCandidatePool pool = candidatePool == null ? PlaceCandidatePool.empty(req == null ? null : req.city()) : candidatePool;
+        if (pool.totalItemCount() == 0) {
             throw new IllegalArgumentException("No local POI catalog is available for city: " + (req == null ? null : req.city()));
         }
 
         int days = Math.max(1, req == null ? 1 : req.days());
         String pace = normalizePace(req == null ? null : req.pace());
         int nonMealTarget = nonMealStopsPerDay(pace, req == null ? null : req.party());
-        LocalPoiItem hotel = chooseHotel(catalog.hotels(), req);
-        List<String> areaRotation = areaRotation(catalog, nonMealTarget);
+        PlaceCandidate hotel = chooseHotel(pool.hotels(), req);
+        List<String> areaRotation = areaRotation(pool, nonMealTarget, skeleton);
         Set<String> usedAttractions = new HashSet<>();
         Set<String> usedRestaurants = new HashSet<>();
-        List<PlanDraftResponse.DayPlan> dayPlans = new ArrayList<>();
+        List<PlanDraft.DayPlan> dayPlans = new ArrayList<>();
 
         for (int dayIndex = 1; dayIndex <= days; dayIndex++) {
             String anchorArea = areaRotation.get((dayIndex - 1) % areaRotation.size());
-            List<LocalPoiItem> attractions = selectAttractionsForDay(
-                    catalog.attractions(),
+            List<PlaceCandidate> attractions = selectAttractionsForDay(
+                    pool.attractions(),
                     req,
                     anchorArea,
                     nonMealTarget,
@@ -62,14 +85,14 @@ public class LocalPlanGeneratorService {
             );
             attractions.forEach(item -> usedAttractions.add(identityKey(item)));
 
-            LocalPoiItem lunch = selectRestaurant(catalog.restaurants(), attractions, "lunch", req, usedRestaurants);
+            PlaceCandidate lunch = selectRestaurant(pool.restaurants(), attractions, "lunch", req, usedRestaurants);
             usedRestaurants.add(identityKey(lunch));
-            LocalPoiItem dinner = selectRestaurant(catalog.restaurants(), attractions, "dinner", req, usedRestaurants);
+            PlaceCandidate dinner = selectRestaurant(pool.restaurants(), attractions, "dinner", req, usedRestaurants);
             usedRestaurants.add(identityKey(dinner));
 
-            List<PlanDraftResponse.Place> stops = scheduleDayStops(attractions, lunch, dinner, dayIndex);
+            List<PlanDraft.Place> stops = scheduleDayStops(attractions, lunch, dinner, dayIndex);
             String theme = dayTheme(dayIndex, anchorArea, attractions);
-            dayPlans.add(new PlanDraftResponse.DayPlan(
+            dayPlans.add(new PlanDraft.DayPlan(
                     dayIndex,
                     toHotelPlace(hotel),
                     stops,
@@ -81,52 +104,52 @@ public class LocalPlanGeneratorService {
             ));
         }
 
-        return new PlanDraftResponse(
-                catalog.city(),
-                catalog.country(),
+        return new PlanDraft(
+                pool.city(),
+                pool.country(),
                 days,
-                catalog.currency(),
-                req == null ? new CreatePlanReq.Party(2, 0) : req.party(),
+                pool.currency(),
+                toPlanDraftParty(req == null ? new CreatePlanReq.Party(2, 0) : req.party()),
                 pace,
-                catalog.city() + " " + days + "-Day Local Fast Itinerary",
+                pool.city() + " " + days + "-Day Local Fast Itinerary",
                 "A fast local itinerary generated from curated local POI data with area-aware daily routing.",
                 dayPlans,
                 "local-fast"
         );
     }
 
-    private List<LocalPoiItem> selectAttractionsForDay(
-            List<LocalPoiItem> attractions,
+    private List<PlaceCandidate> selectAttractionsForDay(
+            List<PlaceCandidate> attractions,
             CreatePlanReq req,
             String anchorArea,
             int targetCount,
             Set<String> used
     ) {
-        List<LocalPoiItem> selected = attractions.stream()
+        List<PlaceCandidate> selected = attractions.stream()
                 .filter(item -> !used.contains(identityKey(item)))
                 .filter(item -> sameArea(item.area(), anchorArea))
                 .sorted(Comparator
-                        .comparingInt((LocalPoiItem item) -> attractionScore(item, req, anchorArea)).reversed()
-                        .thenComparing(LocalPoiItem::name))
+                        .comparingInt((PlaceCandidate item) -> attractionScore(item, req, anchorArea)).reversed()
+                        .thenComparing(PlaceCandidate::name))
                 .limit(targetCount)
                 .toList();
         if (selected.size() >= targetCount) {
             return selected;
         }
-        List<LocalPoiItem> fallback = new ArrayList<>(selected);
+        List<PlaceCandidate> fallback = new ArrayList<>(selected);
         Set<String> selectedKeys = fallback.stream().map(this::identityKey).collect(Collectors.toSet());
         attractions.stream()
                 .filter(item -> !used.contains(identityKey(item)))
                 .filter(item -> !selectedKeys.contains(identityKey(item)))
                 .sorted(Comparator
-                        .comparingInt((LocalPoiItem item) -> fallbackAttractionScore(item, req, fallback)).reversed()
-                        .thenComparing(LocalPoiItem::name))
+                        .comparingInt((PlaceCandidate item) -> fallbackAttractionScore(item, req, fallback)).reversed()
+                        .thenComparing(PlaceCandidate::name))
                 .limit(targetCount - selected.size())
                 .forEach(fallback::add);
         return fallback;
     }
 
-    private int fallbackAttractionScore(LocalPoiItem item, CreatePlanReq req, List<LocalPoiItem> selected) {
+    private int fallbackAttractionScore(PlaceCandidate item, CreatePlanReq req, List<PlaceCandidate> selected) {
         int score = safePriority(item) * 3;
         if (matchesRequestedStyle(item, req)) {
             score += 40;
@@ -150,7 +173,7 @@ public class LocalPlanGeneratorService {
         return score;
     }
 
-    private int attractionScore(LocalPoiItem item, CreatePlanReq req, String anchorArea) {
+    private int attractionScore(PlaceCandidate item, CreatePlanReq req, String anchorArea) {
         int score = safePriority(item) * 3;
         if (sameArea(item.area(), anchorArea)) {
             score += 80;
@@ -167,27 +190,27 @@ public class LocalPlanGeneratorService {
         return score;
     }
 
-    private LocalPoiItem selectRestaurant(
-            List<LocalPoiItem> restaurants,
-            List<LocalPoiItem> attractions,
+    private PlaceCandidate selectRestaurant(
+            List<PlaceCandidate> restaurants,
+            List<PlaceCandidate> attractions,
             String mealType,
             CreatePlanReq req,
             Set<String> used
     ) {
         Set<String> dayAreas = attractions.stream()
-                .map(LocalPoiItem::area)
+                .map(PlaceCandidate::area)
                 .filter(area -> area != null && !area.isBlank())
                 .map(this::normalize)
                 .collect(Collectors.toCollection(HashSet::new));
 
-        List<LocalPoiItem> candidates = restaurants.stream()
+        List<PlaceCandidate> candidates = restaurants.stream()
                 .filter(item -> item.hasMealType(mealType))
                 .filter(item -> !used.contains(identityKey(item)))
                 .sorted(Comparator
-                        .comparingInt((LocalPoiItem item) -> restaurantScore(item, req, attractions, dayAreas)).reversed()
-                        .thenComparing(LocalPoiItem::name))
+                        .comparingInt((PlaceCandidate item) -> restaurantScore(item, req, attractions, dayAreas)).reversed()
+                        .thenComparing(PlaceCandidate::name))
                 .toList();
-        List<LocalPoiItem> nearbyCandidates = candidates.stream()
+        List<PlaceCandidate> nearbyCandidates = candidates.stream()
                 .filter(item -> nearestDistanceKm(item, attractions) <= MEAL_HARD_DISTANCE_KM)
                 .toList();
         if (!nearbyCandidates.isEmpty()) {
@@ -196,9 +219,9 @@ public class LocalPlanGeneratorService {
         if (!candidates.isEmpty()) {
             return candidates.getFirst();
         }
-        List<LocalPoiItem> reusableCandidates = restaurants.stream()
+        List<PlaceCandidate> reusableCandidates = restaurants.stream()
                 .filter(item -> item.hasMealType(mealType))
-                .sorted(Comparator.comparingInt((LocalPoiItem item) -> restaurantScore(item, req, attractions, dayAreas)).reversed())
+                .sorted(Comparator.comparingInt((PlaceCandidate item) -> restaurantScore(item, req, attractions, dayAreas)).reversed())
                 .toList();
         return reusableCandidates.stream()
                 .filter(item -> nearestDistanceKm(item, attractions) <= MEAL_HARD_DISTANCE_KM)
@@ -208,7 +231,7 @@ public class LocalPlanGeneratorService {
                         .orElseThrow(() -> new IllegalStateException("No local restaurant supports " + mealType)));
     }
 
-    private int restaurantScore(LocalPoiItem item, CreatePlanReq req, List<LocalPoiItem> attractions, Set<String> dayAreas) {
+    private int restaurantScore(PlaceCandidate item, CreatePlanReq req, List<PlaceCandidate> attractions, Set<String> dayAreas) {
         int score = safePriority(item) * 3;
         if (dayAreas.contains(normalize(item.area()))) {
             score += 80;
@@ -236,19 +259,19 @@ public class LocalPlanGeneratorService {
         return score;
     }
 
-    private List<PlanDraftResponse.Place> scheduleDayStops(
-            List<LocalPoiItem> attractions,
-            LocalPoiItem lunch,
-            LocalPoiItem dinner,
+    private List<PlanDraft.Place> scheduleDayStops(
+            List<PlaceCandidate> attractions,
+            PlaceCandidate lunch,
+            PlaceCandidate dinner,
             int dayIndex
     ) {
-        List<PlanDraftResponse.Place> stops = new ArrayList<>();
+        List<PlanDraft.Place> stops = new ArrayList<>();
         int current = DAY_START_MINUTES;
         boolean lunchInserted = false;
-        LocalPoiItem previous = null;
+        PlaceCandidate previous = null;
         int scheduledAttractions = 0;
         for (int i = 0; i < attractions.size(); i++) {
-            LocalPoiItem attraction = attractions.get(i);
+            PlaceCandidate attraction = attractions.get(i);
             int stay = stayMinutes(attraction);
             if (shouldSkipAfternoonStopToProtectDinner(current, previous, attraction, dinner, stay, lunchInserted, scheduledAttractions)) {
                 continue;
@@ -282,9 +305,9 @@ public class LocalPlanGeneratorService {
 
     private boolean shouldSkipAfternoonStopToProtectDinner(
             int currentMinutes,
-            LocalPoiItem previous,
-            LocalPoiItem next,
-            LocalPoiItem dinner,
+            PlaceCandidate previous,
+            PlaceCandidate next,
+            PlaceCandidate dinner,
             int nextStayMinutes,
             boolean lunchInserted,
             int scheduledAttractions
@@ -301,9 +324,9 @@ public class LocalPlanGeneratorService {
 
     private boolean shouldInsertLunchBeforeNextStop(
             int currentMinutes,
-            LocalPoiItem previous,
-            LocalPoiItem next,
-            LocalPoiItem lunch,
+            PlaceCandidate previous,
+            PlaceCandidate next,
+            PlaceCandidate lunch,
             int nextStayMinutes
     ) {
         if (currentMinutes >= LUNCH_START_MINUTES) {
@@ -312,20 +335,20 @@ public class LocalPlanGeneratorService {
         return currentMinutes + transferMinutes(previous, next) + nextStayMinutes + transferMinutes(next, lunch) > LUNCH_LATEST_START_MINUTES;
     }
 
-    private PlanDraftResponse.Place toHotelPlace(LocalPoiItem item) {
+    private PlanDraft.Place toHotelPlace(PlaceCandidate item) {
         return toPlace(item, "hotel", "night", null, null, 0,
                 item.name() + " is used as a stable base for the local fast itinerary.",
                 "Confirm current rates and availability before booking.");
     }
 
-    private PlanDraftResponse.Place toAttractionPlace(LocalPoiItem item, String slot, int start, int stay, int dayIndex) {
+    private PlanDraft.Place toAttractionPlace(PlaceCandidate item, String slot, int start, int stay, int dayIndex) {
         int safeStart = safeStartForStay(start, stay);
         return toPlace(item, normalizeCategory(item.category()), slot, formatMinutes(safeStart), formatMinutes(safeStart + stay), stay,
                 item.name() + " anchors Day " + dayIndex + " around " + item.area() + " with a verified local stop.",
                 "Keep the visit flexible around weather and daily pace.");
     }
 
-    private PlanDraftResponse.Place toMealPlace(LocalPoiItem item, String mealType, int start, int dayIndex) {
+    private PlanDraft.Place toMealPlace(PlaceCandidate item, String mealType, int start, int dayIndex) {
         int stay = stayMinutes(item);
         int safeStart = safeStartForStay(start, stay);
         return toPlace(item, "restaurant", mealType, formatMinutes(safeStart), formatMinutes(safeStart + stay), stay,
@@ -333,8 +356,8 @@ public class LocalPlanGeneratorService {
                 "Keep the meal timing flexible around the surrounding stops.");
     }
 
-    private PlanDraftResponse.Place toPlace(
-            LocalPoiItem item,
+    private PlanDraft.Place toPlace(
+            PlaceCandidate item,
             String category,
             String timeSlot,
             String startTime,
@@ -343,7 +366,7 @@ public class LocalPlanGeneratorService {
             String reason,
             String tip
     ) {
-        return new PlanDraftResponse.Place(
+        return new PlanDraft.Place(
                 item.name(),
                 item.addressLine(),
                 item.area(),
@@ -372,16 +395,20 @@ public class LocalPlanGeneratorService {
         );
     }
 
-    private LocalPoiItem chooseHotel(List<LocalPoiItem> hotels, CreatePlanReq req) {
+    private PlanDraft.Party toPlanDraftParty(CreatePlanReq.Party party) {
+        return party == null ? null : new PlanDraft.Party(party.adults(), party.kids());
+    }
+
+    private PlaceCandidate chooseHotel(List<PlaceCandidate> hotels, CreatePlanReq req) {
         return hotels.stream()
                 .sorted(Comparator
-                        .comparingInt((LocalPoiItem item) -> hotelScore(item, req)).reversed()
-                        .thenComparing(LocalPoiItem::name))
+                        .comparingInt((PlaceCandidate item) -> hotelScore(item, req)).reversed()
+                        .thenComparing(PlaceCandidate::name))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("Local catalog has no hotels"));
     }
 
-    private int hotelScore(LocalPoiItem item, CreatePlanReq req) {
+    private int hotelScore(PlaceCandidate item, CreatePlanReq req) {
         int score = safePriority(item) * 3;
         String preferredBudget = preferredBudgetLevel(req);
         if (!preferredBudget.isBlank() && preferredBudget.equals(normalize(item.budgetLevel()))) {
@@ -390,9 +417,13 @@ public class LocalPlanGeneratorService {
         return score;
     }
 
-    private List<String> areaRotation(LocalPoiCatalog catalog, int targetStopsPerDay) {
+    private List<String> areaRotation(PlaceCandidatePool catalog, int targetStopsPerDay, TripSkeleton skeleton) {
+        List<String> skeletonAreas = skeletonAreas(catalog, skeleton);
+        if (!skeletonAreas.isEmpty()) {
+            return skeletonAreas;
+        }
         Map<String, Integer> counts = new LinkedHashMap<>();
-        for (LocalPoiItem item : catalog.attractions()) {
+        for (PlaceCandidate item : catalog.attractions()) {
             if (item.area() == null || item.area().isBlank()) {
                 continue;
             }
@@ -412,6 +443,36 @@ public class LocalPlanGeneratorService {
                 .map(Map.Entry::getKey)
                 .toList();
         return areas.isEmpty() ? List.of(catalog.city()) : areas;
+    }
+
+    private List<String> skeletonAreas(PlaceCandidatePool catalog, TripSkeleton skeleton) {
+        if (catalog == null || skeleton == null || skeleton.days() == null || skeleton.days().isEmpty()) {
+            return List.of();
+        }
+        List<String> knownAreas = catalog.attractions() == null ? List.of() : catalog.attractions().stream()
+                .map(PlaceCandidate::area)
+                .filter(area -> area != null && !area.isBlank())
+                .distinct()
+                .toList();
+        List<String> areas = new ArrayList<>();
+        for (TripSkeleton.DaySkeleton day : skeleton.days()) {
+            String area = areaForZoneId(day.zoneId(), knownAreas);
+            if (area != null && !area.isBlank()) {
+                areas.add(area);
+            }
+        }
+        return areas;
+    }
+
+    private String areaForZoneId(String zoneId, List<String> knownAreas) {
+        if (zoneId == null || zoneId.isBlank() || knownAreas == null) {
+            return null;
+        }
+        String normalizedZone = normalize(zoneId).replace("_", "-");
+        return knownAreas.stream()
+                .filter(area -> normalizedZone.endsWith(normalize(area).replace(" ", "-").replace("_", "-")))
+                .findFirst()
+                .orElse(null);
     }
 
     private List<String> balancedAreaRotation(List<AreaSlot> slots) {
@@ -459,7 +520,7 @@ public class LocalPlanGeneratorService {
                 || "south bank".equals(normalized);
     }
 
-    private String dayTheme(int dayIndex, String area, List<LocalPoiItem> attractions) {
+    private String dayTheme(int dayIndex, String area, List<PlaceCandidate> attractions) {
         String categories = attractions.stream()
                 .map(item -> displayCategory(normalizeCategory(item.category())))
                 .distinct()
@@ -468,26 +529,26 @@ public class LocalPlanGeneratorService {
         return "Day " + dayIndex + " " + area + " " + (categories.isBlank() ? "local highlights" : categories);
     }
 
-    private String morningNote(List<LocalPoiItem> attractions) {
+    private String morningNote(List<PlaceCandidate> attractions) {
         return attractions.isEmpty()
                 ? "Start with a flexible local morning."
                 : "Start around " + attractions.getFirst().area() + " with " + attractions.getFirst().name() + ".";
     }
 
-    private String afternoonNote(List<LocalPoiItem> attractions) {
+    private String afternoonNote(List<PlaceCandidate> attractions) {
         if (attractions.size() < 2) {
             return "Keep the afternoon flexible around the confirmed stops.";
         }
-        LocalPoiItem item = attractions.get(attractions.size() - 1);
+        PlaceCandidate item = attractions.get(attractions.size() - 1);
         return "Continue with " + item.name() + " while keeping the route compact.";
     }
 
-    private String eveningNote(LocalPoiItem dinner) {
+    private String eveningNote(PlaceCandidate dinner) {
         return "Finish with " + dinner.name() + " as the planned dinner stop.";
     }
 
-    private String dayNote(int dayIndex, String area, List<LocalPoiItem> attractions) {
-        String names = attractions.stream().map(LocalPoiItem::name).limit(2).collect(Collectors.joining(" and "));
+    private String dayNote(int dayIndex, String area, List<PlaceCandidate> attractions) {
+        String names = attractions.stream().map(PlaceCandidate::name).limit(2).collect(Collectors.joining(" and "));
         return "Day " + dayIndex + " focuses on " + area + (names.isBlank() ? "." : " around " + names + ".");
     }
 
@@ -524,7 +585,7 @@ public class LocalPlanGeneratorService {
         return "high";
     }
 
-    private boolean matchesRequestedStyle(LocalPoiItem item, CreatePlanReq req) {
+    private boolean matchesRequestedStyle(PlaceCandidate item, CreatePlanReq req) {
         if (req == null || req.style() == null || req.style().isEmpty()) {
             return false;
         }
@@ -552,15 +613,15 @@ public class LocalPlanGeneratorService {
         return !a.isBlank() && (a.equals(b) || a.contains(b) || b.contains(a));
     }
 
-    private int stayMinutes(LocalPoiItem item) {
+    private int stayMinutes(PlaceCandidate item) {
         return item == null || item.stayMinutes() == null || item.stayMinutes() <= 0 ? 60 : item.stayMinutes();
     }
 
-    private int safePriority(LocalPoiItem item) {
+    private int safePriority(PlaceCandidate item) {
         return item == null || item.priority() == null ? 50 : item.priority();
     }
 
-    private double nearestDistanceKm(LocalPoiItem item, List<LocalPoiItem> others) {
+    private double nearestDistanceKm(PlaceCandidate item, List<PlaceCandidate> others) {
         if (item == null || item.latitude() == null || item.longitude() == null || others == null || others.isEmpty()) {
             return Double.MAX_VALUE;
         }
@@ -571,7 +632,7 @@ public class LocalPlanGeneratorService {
                 .orElse(Double.MAX_VALUE);
     }
 
-    private int transferMinutes(LocalPoiItem from, LocalPoiItem to) {
+    private int transferMinutes(PlaceCandidate from, PlaceCandidate to) {
         if (from == null || to == null || from.latitude() == null || from.longitude() == null
                 || to.latitude() == null || to.longitude() == null) {
             return 0;
@@ -618,17 +679,30 @@ public class LocalPlanGeneratorService {
         return category == null ? "" : category.replace("_", " ");
     }
 
-    private String catalogState(LocalPoiItem item) {
-        LocalPoiCatalog catalog = catalogService.catalogForCity(item == null ? null : item.city());
-        return catalog.state();
+    private String catalogState(PlaceCandidate item) {
+        PlaceCandidatePool candidatePool = candidatePoolForCity(item == null ? null : item.city());
+        return candidatePool.state();
     }
 
-    private String catalogCountry(LocalPoiItem item) {
-        LocalPoiCatalog catalog = catalogService.catalogForCity(item == null ? null : item.city());
-        return catalog.country();
+    private String catalogCountry(PlaceCandidate item) {
+        PlaceCandidatePool candidatePool = candidatePoolForCity(item == null ? null : item.city());
+        return candidatePool.country();
     }
 
-    private String identityKey(LocalPoiItem item) {
+    private PlaceCandidatePool candidatePoolForCity(String city) {
+        return catalogService.buildCandidatePool(new TripPlanningSpecification(
+                new TripPlanningSpecification.Destination(city),
+                1,
+                null,
+                null,
+                List.of(),
+                "normal",
+                null,
+                null
+        ));
+    }
+
+    private String identityKey(PlaceCandidate item) {
         return normalize(item == null ? null : item.name()) + "|" + normalize(item == null ? null : item.addressLine());
     }
 

@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import thesis.project.gu.catalog.local.LocalPoiCatalogService;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.planning.domain.PlanDraft;
 import thesis.project.gu.planning.localfast.LocalPlanGeneratorService;
 import thesis.project.gu.planning.quality.LocalPlanQualityDiagnosticService;
 import thesis.project.gu.planning.quality.LocalPlanQualityReport;
@@ -21,6 +22,16 @@ class LocalPlanQualityDiagnosticServiceTest {
     @Test
     void generatedTwentyDayBrisbanePlanHasNoHardQualityErrors() {
         PlanDraftResponse draft = generatorService.generate(req(20));
+
+        LocalPlanQualityReport report = diagnosticService.diagnoseResponse(draft);
+
+        assertThat(report.errorCount()).isZero();
+        assertThat(report.score()).isGreaterThanOrEqualTo(60);
+    }
+
+    @Test
+    void domainDiagnosticPathAcceptsPlanDraft() {
+        PlanDraft draft = PlanDraft.fromResponse(generatorService.generate(req(3)));
 
         LocalPlanQualityReport report = diagnosticService.diagnose(draft);
 
@@ -57,7 +68,7 @@ class LocalPlanQualityDiagnosticServiceTest {
                 "local-fast"
         );
 
-        LocalPlanQualityReport report = diagnosticService.diagnose(draft);
+        LocalPlanQualityReport report = diagnosticService.diagnoseResponse(draft);
 
         assertThat(report.hasErrors()).isTrue();
         assertThat(report.warnings()).extracting(LocalPlanQualityReport.Warning::code)

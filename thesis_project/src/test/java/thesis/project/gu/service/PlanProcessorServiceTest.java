@@ -18,6 +18,10 @@ import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
 import thesis.project.gu.planning.ai.TripAiService;
 import thesis.project.gu.planning.application.PlanProcessorService;
+import thesis.project.gu.planning.domain.PlaceCandidatePool;
+import thesis.project.gu.planning.domain.PlanDraft;
+import thesis.project.gu.planning.domain.TripSkeleton;
+import thesis.project.gu.planning.domain.TripPlanningSpecification;
 import thesis.project.gu.planning.localfast.LocalPlanGeneratorService;
 import thesis.project.gu.planning.quality.LocalPlanQualityDiagnosticService;
 import thesis.project.gu.planning.quality.LocalPlanQualityReport;
@@ -56,6 +60,8 @@ class PlanProcessorServiceTest {
     private LocalPlanGeneratorService localPlanGeneratorService;
     @Mock
     private LocalPlanQualityDiagnosticService localPlanQualityDiagnosticService;
+    @Mock
+    private DuplicatePoiRepairService duplicatePoiRepairService;
 
     private ObjectMapper objectMapper;
     private PlanProcessorService service;
@@ -81,7 +87,8 @@ class PlanProcessorServiceTest {
                 placeHeuristicService,
                 stringRedisTemplate,
                 localPlanGeneratorService,
-                localPlanQualityDiagnosticService
+                localPlanQualityDiagnosticService,
+                duplicatePoiRepairService
         );
         service.clearRouteChoiceCrossRequestCache();
     }
@@ -94,16 +101,17 @@ class PlanProcessorServiceTest {
                 place("Local Lunch", "restaurant", "lunch", "12:15", "13:15", "lunch", "Lunch", "Lunch tip", -27.471, 153.021),
                 place("Local Dinner", "restaurant", "dinner", "17:30", "18:30", "dinner", "Dinner", "Dinner tip", -27.472, 153.022)
         ));
-        when(localPlanGeneratorService.generate(localReq)).thenReturn(localDraft);
-        when(localPlanQualityDiagnosticService.diagnose(any())).thenReturn(new LocalPlanQualityReport(100, 0, 0, List.of()));
+        when(localPlanGeneratorService.generate(any(TripPlanningSpecification.class), any(PlaceCandidatePool.class), any(TripSkeleton.class)))
+                .thenReturn(PlanDraft.fromResponse(localDraft));
+        when(localPlanQualityDiagnosticService.diagnose(any(PlanDraft.class))).thenReturn(new LocalPlanQualityReport(100, 0, 0, List.of()));
 
         PlanDraftResponse result = service.generateDraft(localReq, false, true);
 
         assertThat(result.copyPolishStatus()).isEqualTo("deferred");
         assertThat(result.city()).isEqualTo(localDraft.city());
         assertThat(result.daysPlan()).hasSize(localDraft.daysPlan().size());
-        verify(localPlanGeneratorService).generate(localReq);
-        verify(localPlanQualityDiagnosticService).diagnose(result);
+        verify(localPlanGeneratorService).generate(any(TripPlanningSpecification.class), any(PlaceCandidatePool.class), any(TripSkeleton.class));
+        verify(localPlanQualityDiagnosticService).diagnose(any(PlanDraft.class));
         verify(aiService, never()).generatePlanRaw(any());
         verify(aiService, never()).generatePlanRawPhased(any());
         verify(aiService, never()).polishPlanCopy(any());

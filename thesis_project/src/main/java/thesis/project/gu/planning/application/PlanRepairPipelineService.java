@@ -3,6 +3,7 @@ package thesis.project.gu.planning.application;
 import org.springframework.stereotype.Service;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
+import thesis.project.gu.planning.domain.PlanDraft;
 import thesis.project.gu.planning.metrics.PlanStageMetrics;
 import thesis.project.gu.catalog.verification.RestaurantVerificationService;
 
@@ -29,15 +30,16 @@ public class PlanRepairPipelineService {
         qualityStages.add(operations.captureStageMetrics(attemptLabel + "/raw_parsed", parsed.draft(), req, null));
 
         EntityVerificationResult verified = operations.verifyAndRepairEntities(parsed.draft(), attemptLabel, stageSummary, timingSummary);
-        PlanDraftResponse draft = verified.draft();
+        PlanDraft draft = verified.draft();
         List<String> validationIssues = verified.validationIssues();
         qualityStages.add(operations.captureStageMetrics(attemptLabel + "/entity_verified", draft, req, validationIssues));
 
         draft = operations.applySemanticPruning(draft, req, attemptLabel, stageSummary, timingSummary);
 
         long stageStartedAt = System.currentTimeMillis();
-        draft = restaurantVerificationService.ensureRequiredMeals(draft);
-        draft = restaurantVerificationService.verifyAndNormalize(draft).draft();
+        PlanDraftResponse mealVerified = restaurantVerificationService.ensureRequiredMeals(draft == null ? null : draft.toResponse());
+        mealVerified = restaurantVerificationService.verifyAndNormalize(mealVerified).draft();
+        draft = PlanDraft.fromResponse(mealVerified);
         operations.appendStageTiming(timingSummary, attemptLabel + "/ensure-required-meals", System.currentTimeMillis() - stageStartedAt);
 
         draft = operations.applyThemeParkGovernance(draft, req, attemptLabel, stageSummary, timingSummary);
@@ -50,9 +52,9 @@ public class PlanRepairPipelineService {
         return new ProcessAttemptResult(draft, validationIssues);
     }
 
-    public PlanDraftResponse localRescueBeforeRetryIfValid(
+    public PlanDraft localRescueBeforeRetryIfValid(
             CreatePlanReq req,
-            PlanDraftResponse draft,
+            PlanDraft draft,
             List<String> validationIssues,
             StringBuilder stageSummary,
             StringBuilder timingSummary,
@@ -64,7 +66,7 @@ public class PlanRepairPipelineService {
 
     public DeterministicFallbackResult deterministicRepairIfValid(
             CreatePlanReq req,
-            PlanDraftResponse draft,
+            PlanDraft draft,
             List<String> validationIssues,
             String attemptLabel,
             StringBuilder stageSummary,
@@ -77,7 +79,7 @@ public class PlanRepairPipelineService {
 
     public DeterministicFallbackResult deterministicRetryFallbackIfValid(
             CreatePlanReq req,
-            PlanDraftResponse draft,
+            PlanDraft draft,
             List<String> validationIssues,
             StringBuilder stageSummary,
             StringBuilder timingSummary,
@@ -87,8 +89,8 @@ public class PlanRepairPipelineService {
         return operations.deterministicRetryFallbackIfValid(req, draft, validationIssues, stageSummary, timingSummary, qualityStages);
     }
 
-    public PlanDraftResponse relaxedPaceFallbackIfValid(
-            PlanDraftResponse draft,
+    public PlanDraft relaxedPaceFallbackIfValid(
+            PlanDraft draft,
             CreatePlanReq req,
             List<String> validationIssues,
             Operations operations
@@ -105,37 +107,37 @@ public class PlanRepairPipelineService {
         ) throws Exception;
 
         abstract EntityVerificationResult verifyAndRepairEntities(
-                PlanDraftResponse draft,
+                PlanDraft draft,
                 String attemptLabel,
                 StringBuilder stageSummary,
                 StringBuilder timingSummary
         );
 
-        abstract PlanDraftResponse applySemanticPruning(
-                PlanDraftResponse draft,
+        abstract PlanDraft applySemanticPruning(
+                PlanDraft draft,
                 CreatePlanReq req,
                 String attemptLabel,
                 StringBuilder stageSummary,
                 StringBuilder timingSummary
         );
 
-        abstract PlanDraftResponse applyThemeParkGovernance(
-                PlanDraftResponse draft,
+        abstract PlanDraft applyThemeParkGovernance(
+                PlanDraft draft,
                 CreatePlanReq req,
                 String attemptLabel,
                 StringBuilder stageSummary,
                 StringBuilder timingSummary
         );
 
-        abstract PlanDraftResponse applyRouteAwareScheduling(
-                PlanDraftResponse draft,
+        abstract PlanDraft applyRouteAwareScheduling(
+                PlanDraft draft,
                 String attemptLabel,
                 StringBuilder stageSummary,
                 StringBuilder timingSummary
         );
 
-        abstract PlanDraftResponse applyPostRouteRepair(
-                PlanDraftResponse draft,
+        abstract PlanDraft applyPostRouteRepair(
+                PlanDraft draft,
                 CreatePlanReq req,
                 String attemptLabel,
                 StringBuilder stageSummary,
@@ -143,7 +145,7 @@ public class PlanRepairPipelineService {
         );
 
         abstract List<String> validateRepairedDraft(
-                PlanDraftResponse draft,
+                PlanDraft draft,
                 CreatePlanReq req,
                 String attemptLabel,
                 StringBuilder timingSummary
@@ -151,16 +153,16 @@ public class PlanRepairPipelineService {
 
         abstract PlanStageMetrics captureStageMetrics(
                 String stage,
-                PlanDraftResponse draft,
+                PlanDraft draft,
                 CreatePlanReq req,
                 List<String> issues
         );
 
         abstract void appendStageTiming(StringBuilder timingSummary, String stage, long elapsedMs);
 
-        abstract PlanDraftResponse localRescueBeforeRetryIfValid(
+        abstract PlanDraft localRescueBeforeRetryIfValid(
                 CreatePlanReq req,
-                PlanDraftResponse draft,
+                PlanDraft draft,
                 List<String> validationIssues,
                 StringBuilder stageSummary,
                 StringBuilder timingSummary,
@@ -169,7 +171,7 @@ public class PlanRepairPipelineService {
 
         abstract DeterministicFallbackResult deterministicRepairIfValid(
                 CreatePlanReq req,
-                PlanDraftResponse draft,
+                PlanDraft draft,
                 List<String> validationIssues,
                 String attemptLabel,
                 StringBuilder stageSummary,
@@ -179,31 +181,31 @@ public class PlanRepairPipelineService {
 
         abstract DeterministicFallbackResult deterministicRetryFallbackIfValid(
                 CreatePlanReq req,
-                PlanDraftResponse draft,
+                PlanDraft draft,
                 List<String> validationIssues,
                 StringBuilder stageSummary,
                 StringBuilder timingSummary,
                 List<PlanStageMetrics> qualityStages
         );
 
-        abstract PlanDraftResponse relaxedPaceFallbackIfValid(
-                PlanDraftResponse draft,
+        abstract PlanDraft relaxedPaceFallbackIfValid(
+                PlanDraft draft,
                 CreatePlanReq req,
                 List<String> validationIssues
         );
     }
 
-    public record ProcessAttemptResult(PlanDraftResponse draft, List<String> validationIssues) {
+    public record ProcessAttemptResult(PlanDraft draft, List<String> validationIssues) {
     }
 
-    public record ParseNormalizeResult(PlanDraftResponse draft) {
+    public record ParseNormalizeResult(PlanDraft draft) {
     }
 
-    public record EntityVerificationResult(PlanDraftResponse draft, List<String> validationIssues) {
+    public record EntityVerificationResult(PlanDraft draft, List<String> validationIssues) {
     }
 
     public record DeterministicFallbackResult(
-            PlanDraftResponse draft,
+            PlanDraft draft,
             List<String> validationIssues,
             boolean accepted
     ) {

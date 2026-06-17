@@ -6,18 +6,18 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import thesis.project.gu.infrastructure.external.google.GooglePlacesClient;
 import thesis.project.gu.routing.domain.StopCoordinate;
 import thesis.project.gu.routing.domain.RouteRecommendationContext;
-import thesis.project.gu.routing.domain.ModeSummary;
-import thesis.project.gu.routing.domain.RouteChoice;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.routing.infrastructure.dto.GeoResponse;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse.DayPlan;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse.Place;
+import thesis.project.gu.planning.domain.PlanDraft;
 import thesis.project.gu.routing.application.MapService;
 import thesis.project.gu.planning.ai.TripAiService;
 import thesis.project.gu.infrastructure.cache.CacheSerive;
@@ -25,6 +25,8 @@ import thesis.project.gu.catalog.verification.HotelVerificationService;
 import thesis.project.gu.catalog.verification.RestaurantVerificationService;
 import thesis.project.gu.catalog.heuristic.PlaceHeuristicService;
 import thesis.project.gu.planning.metrics.PlanStageMetrics;
+import thesis.project.gu.planning.localfast.LocalPlanGeneratorService;
+import thesis.project.gu.planning.quality.LocalPlanQualityDiagnosticService;
 import thesis.project.gu.planning.quality.PlanQualityMetricsService;
 import thesis.project.gu.planning.quality.PlanQualityReport;
 import thesis.project.gu.planning.scheduling.DaySkeletonService;
@@ -33,7 +35,6 @@ import java.time.LocalTime;
 import java.time.Duration;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -44,76 +45,51 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * Legacy facade for the original AI-first planning path.
+ * New top-level generation flow is owned by {@link GenerateInitialPlanUseCase};
+ * this class keeps compatibility entry points and supplies operations for legacy repair/retry internals.
+ */
 @Service
 public class PlanProcessorService {
     private static final Logger log = LoggerFactory.getLogger(PlanProcessorService.class);
     private static final String RELAXED_VALIDATION_BENCHMARK_FLAG = "itrip.plan.validation.relaxedForBenchmark";
     private static final int AUTO_PHASED_RETRY_MIN_DAYS = 3;
-    private static final int MAX_PLAN_RETRY_ATTEMPTS = 1;
     private static final int MAX_INVALID_JSON_REPAIR_ATTEMPTS = 2;
-    private static final int RETRY_ISSUE_SUMMARY_LIMIT = 12;
-    private static final int RETRY_ISSUE_SUMMARY_MAX_CHARS = 900;
-    private static final int RETRY_SKELETON_DAY_HINTS_LIMIT = 6;
-    private static final int RETRY_SKELETON_HINTS_MAX_CHARS = 1200;
-    private static final int RETRY_SCOPED_DAY_CONTEXT_MAX_CHARS = 2200;
-    private static final int RETRY_STABLE_FIELDS_MAX_CHARS = 1200;
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm");
     private static final int DAY_START_MINUTES = 9 * 60;
     private static final int DEFAULT_STAY_MINUTES = 60;
-    private static final Pattern STOP_ISSUE_PATTERN = Pattern.compile("^day-(\\d+)-stop-(\\d+)-(.+)$");
     public static final int LUNCH_EARLIEST_START_MINUTES = 11 * 60 + 15;
     private static final int LUNCH_PREFERRED_EARLIEST_START_MINUTES = 11 * 60 + 30;
     public static final int LUNCH_LATEST_START_MINUTES = 13 * 60;
     private static final int THEME_PARK_DAY_LUNCH_LATEST_START_MINUTES = 14 * 60 + 30;
+    public static final int DINNER_EARLIEST_START_MINUTES = 17 * 60 + 30;
     private static final int DINNER_PREFERRED_EARLIEST_START_MINUTES = 18 * 60;
     private static final int DINNER_PREFERRED_LATEST_START_MINUTES = 19 * 60 + 30;
-    private static final int DINNER_LATEST_START_MINUTES = 20 * 60;
+    public static final int DINNER_LATEST_START_MINUTES = 20 * 60;
     public static final int THEME_PARK_DAY_DINNER_LATEST_START_MINUTES = 20 * 60 + 30;
-    private static final double THEME_PARK_MAX_DAY_TRIP_DISTANCE_METERS = 150_000D;
     private static final int THEME_PARK_AFTERNOON_CONTINUATION_MINUTES = 60;
-    private static final int THEME_PARK_CONTINUATION_MAX_EXTENSION_MINUTES = 150;
-    private static final int THEME_PARK_CONTINUATION_TO_DINNER_TARGET_GAP_MINUTES = 120;
     private static final int CULTURAL_POI_LATEST_END_MINUTES = 17 * 60;
-    private static final int SHORT_WALK_ESTIMATE_MAX_DISTANCE_METERS = 650;
-    private static final int SHORT_WALK_ESTIMATE_STRICT_AREA_DISTANCE_METERS = 450;
-    private static final int SCHEDULING_SAME_AREA_WALK_ESTIMATE_MAX_DISTANCE_METERS = 1_200;
-    private static final int SCHEDULING_SAME_SUBURB_WALK_ESTIMATE_MAX_DISTANCE_METERS = 900;
-    private static final int SCHEDULING_CULTURAL_PRECINCT_WALK_ESTIMATE_MAX_DISTANCE_METERS = 1_400;
-    private static final int SCHEDULING_DIRECT_WALK_ESTIMATE_MAX_DISTANCE_METERS = 750;
-    private static final int SHORT_WALK_ESTIMATE_MIN_MINUTES = 8;
-    private static final int SHORT_WALK_ESTIMATE_BUFFER_MINUTES = 4;
-    private static final double SHORT_WALK_ESTIMATE_METERS_PER_MINUTE = 75.0;
-    private static final int DETERMINISTIC_REPAIR_MAX_PASSES = 3;
-    private static final String ROUTE_CHOICE_REDIS_PREFIX = "nav:route_choice_hybrid:";
-    private static final Duration ROUTE_CHOICE_CACHE_TTL = Duration.ofMinutes(30);
     private static final Duration STOP_LOCATION_CACHE_TTL = Duration.ofMinutes(10);
-    private static final double REDIS_TTL_JITTER_RATIO = 0.10D;
     private static final int COPY_POLISH_LONG_PLAN_DAY_THRESHOLD = 7;
     private static final long COPY_POLISH_LONG_PLAN_MAX_ELAPSED_MS = Duration.ofSeconds(120).toMillis();
     private static final int DETERMINISTIC_SMALL_GAP_OVERRUN_MAX_MINUTES = 30;
     private static final int GEOCODE_BULKHEAD_CONCURRENCY = 6;
-    private static final int ROUTE_SUMMARY_BULKHEAD_CONCURRENCY = 8;
-    private static final Cache<RouteChoiceCacheKey, RouteChoice> ROUTE_CHOICE_L1_CACHE = Caffeine.newBuilder()
-            .maximumSize(20_000)
-            .expireAfterWrite(ROUTE_CHOICE_CACHE_TTL)
-            .build();
     private static final Cache<String, StopLocation> STOP_LOCATION_L1_CACHE = Caffeine.newBuilder()
             .maximumSize(40_000)
             .expireAfterWrite(STOP_LOCATION_CACHE_TTL)
             .build();
     private static final Semaphore GEOCODE_BULKHEAD = new Semaphore(GEOCODE_BULKHEAD_CONCURRENCY, true);
-    private static final Semaphore ROUTE_SUMMARY_BULKHEAD = new Semaphore(ROUTE_SUMMARY_BULKHEAD_CONCURRENCY, true);
 
     private final TripAiService aiService;
     private final CacheSerive cacheSerive;
     private final ObjectMapper objectMapper;
     private final HotelVerificationService hotelVerificationService;
-    private final RestaurantVerificationService restaurantVerificationService;
+    private final MealRepairService mealRepairService;
     private final MapService mapService;
     private final GooglePlacesClient googlePlacesClient;
     private final PlanQualityMetricsService planQualityMetricsService;
@@ -125,14 +101,22 @@ public class PlanProcessorService {
     private final GenerateInitialPlanUseCase generateInitialPlanUseCase;
     private final PlanRepairPipelineService planRepairPipelineService;
     private final PlanResponseAssembler planResponseAssembler;
+    private final PlanRetryInstructionService planRetryInstructionService;
+    private final ThemeParkGovernanceService themeParkGovernanceService;
+    private final DuplicatePoiRepairService duplicatePoiRepairService;
+    private final RoutePlanningService routePlanningService;
     private final CopyPolishService copyPolishService;
+    private final MealTimeWindowRepairService mealTimeWindowRepairService;
+    private final PlanRetryOrchestrationService planRetryOrchestrationService;
+    private final DefaultPlanQualityService planQualityService;
 
+    @Autowired
     public PlanProcessorService(
             TripAiService aiService,
             CacheSerive cacheSerive,
             ObjectMapper objectMapper,
             HotelVerificationService hotelVerificationService,
-            RestaurantVerificationService restaurantVerificationService,
+            MealRepairService mealRepairService,
             MapService mapService,
             GooglePlacesClient googlePlacesClient,
             PlanQualityMetricsService planQualityMetricsService,
@@ -144,13 +128,20 @@ public class PlanProcessorService {
             GenerateInitialPlanUseCase generateInitialPlanUseCase,
             PlanRepairPipelineService planRepairPipelineService,
             PlanResponseAssembler planResponseAssembler,
-            CopyPolishService copyPolishService
+            PlanRetryInstructionService planRetryInstructionService,
+            ThemeParkGovernanceService themeParkGovernanceService,
+            DuplicatePoiRepairService duplicatePoiRepairService,
+            RoutePlanningService routePlanningService,
+            CopyPolishService copyPolishService,
+            MealTimeWindowRepairService mealTimeWindowRepairService,
+            PlanRetryOrchestrationService planRetryOrchestrationService,
+            DefaultPlanQualityService planQualityService
     ) {
         this.aiService = aiService;
         this.cacheSerive = cacheSerive;
         this.objectMapper = objectMapper;
         this.hotelVerificationService = hotelVerificationService;
-        this.restaurantVerificationService = restaurantVerificationService;
+        this.mealRepairService = mealRepairService;
         this.mapService = mapService;
         this.googlePlacesClient = googlePlacesClient;
         this.planQualityMetricsService = planQualityMetricsService;
@@ -162,12 +153,126 @@ public class PlanProcessorService {
         this.generateInitialPlanUseCase = generateInitialPlanUseCase;
         this.planRepairPipelineService = planRepairPipelineService;
         this.planResponseAssembler = planResponseAssembler;
+        this.planRetryInstructionService = planRetryInstructionService;
+        this.themeParkGovernanceService = themeParkGovernanceService;
+        this.duplicatePoiRepairService = duplicatePoiRepairService;
+        this.routePlanningService = routePlanningService;
         this.copyPolishService = copyPolishService;
+        this.mealTimeWindowRepairService = mealTimeWindowRepairService;
+        this.planRetryOrchestrationService = planRetryOrchestrationService;
+        this.planQualityService = planQualityService;
+    }
+
+    PlanProcessorService(
+            TripAiService aiService,
+            CacheSerive cacheSerive,
+            ObjectMapper objectMapper,
+            HotelVerificationService hotelVerificationService,
+            RestaurantVerificationService restaurantVerificationService,
+            MapService mapService,
+            GooglePlacesClient googlePlacesClient,
+            PlanQualityMetricsService planQualityMetricsService,
+            DaySkeletonService daySkeletonService,
+            PlaceHeuristicService placeHeuristicService,
+            StringRedisTemplate stringRedisTemplate,
+            LocalPlanGeneratorService localPlanGeneratorService,
+            LocalPlanQualityDiagnosticService localPlanQualityDiagnosticService,
+            DuplicatePoiRepairService duplicatePoiRepairService
+    ) {
+        this(
+                aiService,
+                cacheSerive,
+                objectMapper,
+                hotelVerificationService,
+                new MealRepairService(restaurantVerificationService, new PlanResponseAssembler()),
+                mapService,
+                googlePlacesClient,
+                planQualityMetricsService,
+                daySkeletonService,
+                placeHeuristicService,
+                stringRedisTemplate,
+                new PlanRequestContextBuilder(new PlanRequestNormalizer(), new PlanGenerationModeResolver()),
+                new AiDraftGenerationService(aiService, objectMapper),
+                new GenerateInitialPlanUseCase(
+                        new PlanRequestContextBuilder(new PlanRequestNormalizer(), new PlanGenerationModeResolver()),
+                        new LightweightRequestPreParser(),
+                        new RetrievalQueryBuilder(),
+                        new thesis.project.gu.catalog.local.StaticDestinationResolver(),
+                        new thesis.project.gu.catalog.application.LocalPlanningZoneRetrievalService(),
+                        new thesis.project.gu.catalog.local.LocalPoiCatalogService(objectMapper),
+                        localPlanGeneratorService,
+                        localPlanQualityDiagnosticService,
+                        new DefaultRoutePlanningService(
+                                new RouteAwareScheduleRepairService(mapService, objectMapper, stringRedisTemplate, placeHeuristicService, daySkeletonService)
+                        ),
+                        new DefaultPlanQualityService(
+                                new DraftValidationService(
+                                        daySkeletonService,
+                                        placeHeuristicService,
+                                        new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
+                                ),
+                                new DeterministicPlanRepairService(
+                                        duplicatePoiRepairService,
+                                        new MealTimeWindowRepairService(
+                                                daySkeletonService,
+                                                new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
+                                        )
+                                ),
+                                new PostRoutePlanRepairService(new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService), daySkeletonService)
+                        ),
+                        new AiDraftGenerationService(aiService, objectMapper)
+                ),
+                new PlanRepairPipelineService(restaurantVerificationService),
+                new PlanResponseAssembler(),
+                new PlanRetryInstructionService(),
+                new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService),
+                duplicatePoiRepairService,
+                new DefaultRoutePlanningService(
+                        new RouteAwareScheduleRepairService(mapService, objectMapper, stringRedisTemplate, placeHeuristicService, daySkeletonService)
+                ),
+                new CopyPolishService(aiService, new PlanFinalizationService()),
+                new MealTimeWindowRepairService(
+                        daySkeletonService,
+                        new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
+                ),
+                new PlanRetryOrchestrationService(
+                        new PlanRepairPipelineService(restaurantVerificationService),
+                        new DeterministicPlanRepairService(
+                                duplicatePoiRepairService,
+                                new MealTimeWindowRepairService(
+                                        daySkeletonService,
+                                        new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
+                                )
+                        )
+                ),
+                new DefaultPlanQualityService(
+                        new DraftValidationService(
+                                daySkeletonService,
+                                placeHeuristicService,
+                                new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
+                        ),
+                        new DeterministicPlanRepairService(
+                                duplicatePoiRepairService,
+                                new MealTimeWindowRepairService(
+                                        daySkeletonService,
+                                        new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
+                                )
+                        ),
+                        new PostRoutePlanRepairService(new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService), daySkeletonService)
+                )
+        );
     }
 
     PlanDraftResponse processExistingRawDraft(CreatePlanReq req, String raw, boolean redisHit, long aiGenerationMs) throws Exception {
         PlanRequestContextBuilder.PlanRequestContext context = planRequestContextBuilder.build(req, redisHit, false);
-        return processDraftSinglePass(context.request(), raw, context.redisHit(), aiGenerationMs, context.deferCopyPolish());
+        return generateInitialPlanUseCase.processGeneratedRawDraft(
+                context.request(),
+                raw,
+                context.redisHit(),
+                aiGenerationMs,
+                context.deferCopyPolish(),
+                initialPlanOperations()
+        );
     }
 
     public PlanDraftResponse generateDraft(CreatePlanReq req, boolean redisHit) throws Exception {
@@ -186,56 +291,66 @@ public class PlanProcessorService {
             }
 
             @Override
-            PlanDraftResponse processGeneratedRawDraft(
+            PlanRepairPipelineService.ProcessAttemptResult processAttemptWithJsonRecovery(
+                    CreatePlanReq req,
+                    String raw,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary,
+                    List<PlanStageMetrics> qualityStages,
+                    Object recoveryContext
+            ) throws Exception {
+                return PlanProcessorService.this.processAttemptWithJsonRecovery(
+                        req,
+                        raw,
+                        attemptLabel,
+                        stageSummary,
+                        timingSummary,
+                        qualityStages,
+                        recoveryContext instanceof DaySkeletonContext daySkeletonContext ? daySkeletonContext : null
+                );
+            }
+
+            @Override
+            PlanDraftResponse validateAndRetry(
                     CreatePlanReq req,
                     String raw,
                     boolean redisHit,
-                    long aiGenerationMs,
+                    long totalStartedAt,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary,
+                    PlanRepairPipelineService.ProcessAttemptResult initialAttempt,
+                    List<PlanStageMetrics> qualityStages,
                     boolean deferCopyPolish
             ) throws Exception {
-                return PlanProcessorService.this.processDraftSinglePass(
+                return PlanProcessorService.this.validateAndRetry(
                         req,
                         raw,
                         redisHit,
-                        aiGenerationMs,
+                        totalStartedAt,
+                        stageSummary,
+                        timingSummary,
+                        initialAttempt,
+                        qualityStages,
                         deferCopyPolish
                 );
             }
-        };
-    }
 
-    private PlanDraftResponse processDraftSinglePass(
-            CreatePlanReq req,
-            String raw,
-            boolean redisHit,
-            long aiGenerationMs,
-            boolean deferCopyPolish
-    ) throws Exception {
-        long totalStartedAt = System.currentTimeMillis() - Math.max(0, aiGenerationMs);
-        StringBuilder stageSummary = new StringBuilder();
-        StringBuilder timingSummary = new StringBuilder();
-        List<PlanStageMetrics> qualityStages = new ArrayList<>();
-        appendStageTiming(timingSummary, "initial/ai-generate", aiGenerationMs);
-
-        try {
-            PlanRepairPipelineService.ProcessAttemptResult initialAttempt = processAttemptWithJsonRecovery(
-                    req,
-                    raw,
-                    "initial",
-                    stageSummary,
-                    timingSummary,
-                    qualityStages,
-                    null
-            );
-            return validateAndRetry(req, raw, redisHit, totalStartedAt, stageSummary, timingSummary, initialAttempt, qualityStages, deferCopyPolish);
-        } catch (Exception e) {
-            if (timingSummary.indexOf("total=") < 0) {
-                appendStageTiming(timingSummary, "total", System.currentTimeMillis() - totalStartedAt);
-                logPlanStageSummary(stageSummary);
-                logPlanStageTimingSummary(timingSummary);
+            @Override
+            void appendStageTiming(StringBuilder timingSummary, String stage, long elapsedMs) {
+                PlanProcessorService.this.appendStageTiming(timingSummary, stage, elapsedMs);
             }
-            throw e;
-        }
+
+            @Override
+            void logPlanStageSummary(StringBuilder stageSummary) {
+                PlanProcessorService.this.logPlanStageSummary(stageSummary);
+            }
+
+            @Override
+            void logPlanStageTimingSummary(StringBuilder timingSummary) {
+                PlanProcessorService.this.logPlanStageTimingSummary(timingSummary);
+            }
+        };
     }
 
     private boolean isPhasedGenerationEnabled(CreatePlanReq req) {
@@ -253,203 +368,125 @@ public class PlanProcessorService {
             List<PlanStageMetrics> qualityStages,
             boolean deferCopyPolish
     ) throws Exception {
-        PlanDraftResponse draft = initialAttempt.draft();
-        List<String> validationIssues = initialAttempt.validationIssues();
-
-        if (validationIssues.isEmpty()) {
-            return finishSuccessfulAttempt(
-                    req,
-                    draft,
-                    timingSummary,
-                    stageSummary,
-                    totalStartedAt,
-                    "initial/copy-polish",
-                    deferCopyPolish,
-                    false,
-                    false,
-                    qualityStages
-            );
-        }
-
-        log.warn("Initial generated itinerary failed validation. req={}, issues={}, maxRetryAttempts={}, rawPreview={}, rawLength={}",
+        return planRetryOrchestrationService.validateAndRetry(
                 req,
-                validationIssues,
-                MAX_PLAN_RETRY_ATTEMPTS,
-                aiDraftGenerationService.shortRawPreview(raw),
-                raw == null ? 0 : raw.length());
-
-        PlanDraftResponse localRescue = planRepairPipelineService.localRescueBeforeRetryIfValid(
-                req,
-                draft,
-                validationIssues,
+                raw,
+                redisHit,
+                totalStartedAt,
                 stageSummary,
                 timingSummary,
+                initialAttempt,
                 qualityStages,
-                repairOperations()
+                deferCopyPolish,
+                retryOrchestrationOperations()
         );
-        if (localRescue != null) {
-            log.warn("Initial itinerary accepted with local rescue before AI retry. req={}, originalIssues={}",
-                    req,
-                    validationIssues);
-            return finishSuccessfulAttempt(
-                    req,
-                    localRescue,
-                    timingSummary,
-                    stageSummary,
-                    totalStartedAt,
-                    "initial/copy-polish",
-                    deferCopyPolish,
-                    false,
-                    false,
-                    qualityStages
-            );
-        }
+    }
 
-        if (isDuplicateDominatedDeterministicFailure(validationIssues)) {
-            PlanRepairPipelineService.DeterministicFallbackResult deterministicEarlyStop = planRepairPipelineService.deterministicRepairIfValid(
-                    req,
-                    draft,
-                    validationIssues,
-                    "initial",
-                    stageSummary,
-                    timingSummary,
-                    qualityStages,
-                    repairOperations()
-            );
-            if (deterministicEarlyStop != null && deterministicEarlyStop.accepted()) {
-                log.warn("Initial itinerary accepted with deterministic duplicate-first fallback. req={}, originalIssues={}",
+    private PlanRetryOrchestrationService.Operations retryOrchestrationOperations() {
+        return new PlanRetryOrchestrationService.Operations() {
+            @Override
+            public PlanRepairPipelineService.Operations repairOperations() {
+                return PlanProcessorService.this.repairOperations();
+            }
+
+            @Override
+            public PlanDraftResponse finishSuccessfulAttempt(
+                    CreatePlanReq req,
+                    PlanDraft verifiedDraft,
+                    StringBuilder timingSummary,
+                    StringBuilder stageSummary,
+                    long totalStartedAt,
+                    String copyPolishTimingLabel,
+                    boolean deferCopyPolish,
+                    boolean retryUsed,
+                    boolean retryRescued,
+                    List<PlanStageMetrics> qualityStages
+            ) {
+                return PlanProcessorService.this.finishSuccessfulAttempt(
                         req,
-                        validationIssues);
-                return finishSuccessfulAttempt(
-                        req,
-                        deterministicEarlyStop.draft(),
+                        verifiedDraft == null ? null : verifiedDraft.toResponse(),
                         timingSummary,
                         stageSummary,
                         totalStartedAt,
-                        "initial/copy-polish",
+                        copyPolishTimingLabel,
                         deferCopyPolish,
-                        false,
-                        false,
+                        retryUsed,
+                        retryRescued,
                         qualityStages
                 );
             }
-        }
 
-        if (redisHit) {
-            cacheSerive.evictAiPlanRaw(req);
-        }
+            @Override
+            public Object skeletonContext(CreatePlanReq req, PlanDraft draft) {
+                return PlanProcessorService.this.skeletonContext(req, draft == null ? null : draft.toResponse());
+            }
 
-        long stageStartedAt = System.currentTimeMillis();
-        DaySkeletonContext retrySkeletonContext = skeletonContext(req, draft);
-        String retryRaw = regenerateRetryAttempt(req, draft, validationIssues, retrySkeletonContext);
-        appendStageTiming(timingSummary, "retry-1/ai-regenerate", System.currentTimeMillis() - stageStartedAt);
+            @Override
+            public String regenerateRetryAttempt(
+                    CreatePlanReq req,
+                    PlanDraft draft,
+                    List<String> validationIssues,
+                    Object retrySkeletonContext
+            ) throws Exception {
+                return PlanProcessorService.this.regenerateRetryAttempt(
+                        req,
+                        draft == null ? null : draft.toResponse(),
+                        validationIssues,
+                        (DaySkeletonContext) retrySkeletonContext
+                );
+            }
 
-        PlanRepairPipelineService.ProcessAttemptResult retryAttempt = processAttemptWithJsonRecovery(
-                req,
-                retryRaw,
-                "retry-1",
-                stageSummary,
-                timingSummary,
-                qualityStages,
-                retrySkeletonContext
-        );
-        PlanDraftResponse retried = retryAttempt.draft();
-        List<String> retryValidationIssues = retryAttempt.validationIssues();
+            @Override
+            public PlanRepairPipelineService.ProcessAttemptResult processAttemptWithJsonRecovery(
+                    CreatePlanReq req,
+                    String raw,
+                    String attemptLabel,
+                    StringBuilder stageSummary,
+                    StringBuilder timingSummary,
+                    List<PlanStageMetrics> qualityStages,
+                    Object retrySkeletonContext
+            ) throws Exception {
+                return PlanProcessorService.this.processAttemptWithJsonRecovery(
+                        req,
+                        raw,
+                        attemptLabel,
+                        stageSummary,
+                        timingSummary,
+                        qualityStages,
+                        (DaySkeletonContext) retrySkeletonContext
+                );
+            }
 
-        if (retryValidationIssues.isEmpty()) {
-            return finishSuccessfulAttempt(
-                    req,
-                    retried,
-                    timingSummary,
-                    stageSummary,
-                    totalStartedAt,
-                    "retry-1/copy-polish",
-                    deferCopyPolish,
-                    true,
-                    true,
-                    qualityStages
-            );
-        }
+            @Override
+            public void evictAiPlanRaw(CreatePlanReq req) {
+                cacheSerive.evictAiPlanRaw(req);
+            }
 
-        PlanRepairPipelineService.DeterministicFallbackResult deterministicFallback = planRepairPipelineService.deterministicRetryFallbackIfValid(
-                req,
-                retried,
-                retryValidationIssues,
-                stageSummary,
-                timingSummary,
-                qualityStages,
-                repairOperations()
-        );
-        if (deterministicFallback != null && deterministicFallback.accepted()) {
-            log.warn("Retry itinerary accepted with deterministic fallback. req={}, originalIssues={}", req, retryValidationIssues);
-            return finishSuccessfulAttempt(
-                    req,
-                    deterministicFallback.draft(),
-                    timingSummary,
-                    stageSummary,
-                    totalStartedAt,
-                    "retry-1/copy-polish",
-                    deferCopyPolish,
-                    true,
-                    true,
-                    qualityStages
-            );
-        }
+            @Override
+            public void appendStageTiming(StringBuilder timingSummary, String stage, long elapsedMs) {
+                PlanProcessorService.this.appendStageTiming(timingSummary, stage, elapsedMs);
+            }
 
-        PlanDraftResponse relaxedFallback = planRepairPipelineService.relaxedPaceFallbackIfValid(
-                retried,
-                req,
-                retryValidationIssues,
-                repairOperations()
-        );
-        if (relaxedFallback != null) {
-            log.warn("Retry itinerary accepted with relaxed pace fallback. req={}, originalIssues={}", req, retryValidationIssues);
-            return finishSuccessfulAttempt(
-                    req,
-                    relaxedFallback,
-                    timingSummary,
-                    stageSummary,
-                    totalStartedAt,
-                    "retry-1/copy-polish",
-                    deferCopyPolish,
-                    true,
-                    true,
-                    qualityStages
-            );
-        }
+            @Override
+            public void logPlanStageSummary(StringBuilder stageSummary) {
+                PlanProcessorService.this.logPlanStageSummary(stageSummary);
+            }
 
-        logPlanStageSummary(stageSummary);
-        appendStageTiming(timingSummary, "total", System.currentTimeMillis() - totalStartedAt);
-        logPlanStageTimingSummary(timingSummary);
-        List<String> finalRetryIssues = deterministicFallback != null && deterministicFallback.validationIssues() != null
-                && !deterministicFallback.validationIssues().isEmpty()
-                ? deterministicFallback.validationIssues()
-                : retryValidationIssues;
-        log.error("Retried generated itinerary failed validation. issues={}, retryRawPreview={}, retryRawLength={}",
-                finalRetryIssues,
-                aiDraftGenerationService.shortRawPreview(retryRaw),
-                retryRaw == null ? 0 : retryRaw.length());
-        if (isRelaxedValidationBenchmarkEnabled() && !hasRequestedDayCountIssue(finalRetryIssues)) {
-            log.warn("Accepting retried itinerary despite validation issues because {}=true. req={}, issues={}",
-                    RELAXED_VALIDATION_BENCHMARK_FLAG,
-                    req,
-                    finalRetryIssues);
-            return finishSuccessfulAttempt(
-                    req,
-                    retried,
-                    timingSummary,
-                    stageSummary,
-                    totalStartedAt,
-                    "retry-1/relaxed-validation-benchmark-copy-polish",
-                    deferCopyPolish,
-                    true,
-                    false,
-                    qualityStages
-            );
-        }
-        throw thesis.project.gu.exception.ErrorCode.INTERNAL_ERROR.ex(
-                "Retried generated itinerary failed validation: " + finalRetryIssues
-        );
+            @Override
+            public void logPlanStageTimingSummary(StringBuilder timingSummary) {
+                PlanProcessorService.this.logPlanStageTimingSummary(timingSummary);
+            }
+
+            @Override
+            public String shortRawPreview(String raw) {
+                return aiDraftGenerationService.shortRawPreview(raw);
+            }
+
+            @Override
+            public boolean isRelaxedValidationBenchmarkEnabled() {
+                return PlanProcessorService.this.isRelaxedValidationBenchmarkEnabled();
+            }
+        };
     }
 
     private boolean isRelaxedValidationBenchmarkEnabled() {
@@ -497,12 +534,76 @@ public class PlanProcessorService {
             List<String> validationIssues,
             DaySkeletonContext retrySkeletonContext
     ) throws Exception {
-        String compactSkeletonHints = compactRetrySkeletonHints(retrySkeletonContext, validationIssues);
+        String compactSkeletonHints = planRetryInstructionService.compactSkeletonHints(
+                retrySkeletonHints(retrySkeletonContext),
+                validationIssues
+        );
         return aiDraftGenerationService.regenerateWholePlanRaw(
                 req,
-                retryInstruction(req, validationIssues, retrySkeletonContext, failedDraft),
+                planRetryInstructionService.wholePlanInstruction(
+                        req,
+                        validationIssues,
+                        retrySkeletonHints(retrySkeletonContext),
+                        failedDraft,
+                        retryInstructionOperations()
+                ),
                 compactSkeletonHints
         );
+    }
+
+    private PlanRetryInstructionService.SkeletonHints retrySkeletonHints(DaySkeletonContext context) {
+        if (context == null) {
+            return null;
+        }
+        return new PlanRetryInstructionService.SkeletonHints(
+                context.effectiveMinByDay(),
+                context.promptHints(),
+                context.promptHintsByDay()
+        );
+    }
+
+    private PlanRetryInstructionService.Operations retryInstructionOperations() {
+        return new PlanRetryInstructionService.Operations() {
+            @Override
+            boolean isStrictMealStop(Place stop) {
+                return PlanProcessorService.this.isStrictMealStop(stop);
+            }
+
+            @Override
+            boolean hasVerifiedMealStop(Place stop, String mealType) {
+                return PlanProcessorService.this.hasVerifiedMealStop(stop, mealType);
+            }
+
+            @Override
+            boolean hasMealSlot(Place stop, String slot) {
+                return PlanProcessorService.this.hasMealSlot(stop, slot);
+            }
+
+            @Override
+            boolean isCountedNonMealStop(Place stop) {
+                return PlanProcessorService.this.isCountedNonMealStop(stop);
+            }
+
+            @Override
+            int countNonMealStops(List<Place> stops) {
+                return PlanProcessorService.this.countNonMealStops(stops);
+            }
+
+            @Override
+            String normalizeSlot(String value) {
+                return PlanProcessorService.this.normalizeSlot(value);
+            }
+
+            @Override
+            String safeStopName(Place stop) {
+                return PlanProcessorService.this.safeStopName(stop);
+            }
+
+            @Override
+            String dayDuplicateRetryInstruction(int dayIndex, PlanDraftResponse failedDraft) {
+                return PlanProcessorService.this.buildDayDuplicateRetryInstruction(dayIndex, failedDraft);
+            }
+        };
     }
 
     private boolean shouldUsePhasedWholePlanRetry(
@@ -543,13 +644,20 @@ public class PlanProcessorService {
         if (targetDayIndexes.isEmpty()) {
             return null;
         }
-        String nonDayIssueInstruction = buildWholePlanNonDayIssueInstruction(validationIssues);
+        String nonDayIssueInstruction = planRetryInstructionService.wholePlanNonDayIssueInstruction(validationIssues);
         Map<Integer, String> retryInstructionsByDay = new java.util.LinkedHashMap<>();
         for (Integer dayIndex : targetDayIndexes) {
             List<String> dayIssues = issuesByDay.getOrDefault(dayIndex, List.of());
             retryInstructionsByDay.put(
                     dayIndex,
-                    retryInstructionForWholePlanDay(dayIndex, dayIssues, failedDraft, skeletonContext, nonDayIssueInstruction)
+                    planRetryInstructionService.wholePlanDayInstruction(
+                            dayIndex,
+                            dayIssues,
+                            failedDraft,
+                            retrySkeletonHints(skeletonContext),
+                            nonDayIssueInstruction,
+                            retryInstructionOperations()
+                    )
             );
         }
         return aiDraftGenerationService.regeneratePlanDaysPhased(req, failedDraft, targetDayIndexes, retryInstructionsByDay);
@@ -696,67 +804,82 @@ public class PlanProcessorService {
 
             @Override
             PlanRepairPipelineService.EntityVerificationResult verifyAndRepairEntities(
-                    PlanDraftResponse draft,
+                    PlanDraft draft,
                     String attemptLabel,
                     StringBuilder stageSummary,
                     StringBuilder timingSummary
             ) {
-                return PlanProcessorService.this.verifyAndRepairEntities(draft, attemptLabel, stageSummary, timingSummary);
+                PlanRepairPipelineService.EntityVerificationResult verified =
+                        PlanProcessorService.this.verifyAndRepairEntities(draft == null ? null : draft.toResponse(), attemptLabel, stageSummary, timingSummary);
+                return new PlanRepairPipelineService.EntityVerificationResult(
+                        verified.draft(),
+                        verified.validationIssues()
+                );
             }
 
             @Override
-            PlanDraftResponse applySemanticPruning(
-                    PlanDraftResponse draft,
+            PlanDraft applySemanticPruning(
+                    PlanDraft draft,
                     CreatePlanReq req,
                     String attemptLabel,
                     StringBuilder stageSummary,
                     StringBuilder timingSummary
             ) {
-                return PlanProcessorService.this.applySemanticPruning(draft, req, attemptLabel, stageSummary, timingSummary);
+                return PlanDraft.fromResponse(PlanProcessorService.this.applySemanticPruning(
+                        draft == null ? null : draft.toResponse(), req, attemptLabel, stageSummary, timingSummary));
             }
 
             @Override
-            PlanDraftResponse applyThemeParkGovernance(
-                    PlanDraftResponse draft,
+            PlanDraft applyThemeParkGovernance(
+                    PlanDraft draft,
                     CreatePlanReq req,
                     String attemptLabel,
                     StringBuilder stageSummary,
                     StringBuilder timingSummary
             ) {
-                return PlanProcessorService.this.applyThemeParkGovernance(draft, req, attemptLabel, stageSummary, timingSummary);
+                return PlanDraft.fromResponse(PlanProcessorService.this.applyThemeParkGovernance(
+                        draft == null ? null : draft.toResponse(), req, attemptLabel, stageSummary, timingSummary));
             }
 
             @Override
-            PlanDraftResponse applyRouteAwareScheduling(
-                    PlanDraftResponse draft,
+            PlanDraft applyRouteAwareScheduling(
+                    PlanDraft draft,
                     String attemptLabel,
                     StringBuilder stageSummary,
                     StringBuilder timingSummary
             ) {
-                return PlanProcessorService.this.applyRouteAwareScheduling(draft, attemptLabel, stageSummary, timingSummary);
+                return routePlanningService.applyRouteAwareScheduling(draft, attemptLabel, stageSummary, timingSummary);
             }
 
             @Override
-            PlanDraftResponse applyPostRouteRepair(
-                    PlanDraftResponse draft,
+            PlanDraft applyPostRouteRepair(
+                    PlanDraft draft,
                     CreatePlanReq req,
                     String attemptLabel,
                     StringBuilder stageSummary,
                     StringBuilder timingSummary
             ) {
-                return PlanProcessorService.this.applyPostRouteRepair(draft, req, attemptLabel, stageSummary, timingSummary);
+                return planQualityService.repairPostRoute(
+                        draft,
+                        req,
+                        attemptLabel,
+                        stageSummary,
+                        timingSummary,
+                        postRouteRepairOperations()
+                );
             }
 
             @Override
             List<String> validateRepairedDraft(
-                    PlanDraftResponse draft,
+                    PlanDraft draft,
                     CreatePlanReq req,
                     String attemptLabel,
                     StringBuilder timingSummary
             ) {
                 long stageStartedAt = System.currentTimeMillis();
-                DaySkeletonContext skeletonContext = skeletonContext(req, draft);
-                List<String> validationIssues = validateDraft(draft, req, skeletonContext);
+                PlanDraftResponse responseDraft = draft == null ? null : draft.toResponse();
+                DaySkeletonContext skeletonContext = skeletonContext(req, responseDraft);
+                List<String> validationIssues = validateDraft(responseDraft, req, skeletonContext);
                 appendStageTiming(timingSummary, attemptLabel + "/validate", System.currentTimeMillis() - stageStartedAt);
                 return validationIssues;
             }
@@ -764,11 +887,11 @@ public class PlanProcessorService {
             @Override
             PlanStageMetrics captureStageMetrics(
                     String stage,
-                    PlanDraftResponse draft,
+                    PlanDraft draft,
                     CreatePlanReq req,
                     List<String> issues
             ) {
-                return PlanProcessorService.this.captureStageMetrics(stage, draft, req, issues);
+                return PlanProcessorService.this.captureStageMetrics(stage, draft == null ? null : draft.toResponse(), req, issues);
             }
 
             @Override
@@ -777,71 +900,82 @@ public class PlanProcessorService {
             }
 
             @Override
-            PlanDraftResponse localRescueBeforeRetryIfValid(
+            PlanDraft localRescueBeforeRetryIfValid(
                     CreatePlanReq req,
-                    PlanDraftResponse draft,
+                    PlanDraft draft,
                     List<String> validationIssues,
                     StringBuilder stageSummary,
                     StringBuilder timingSummary,
                     List<PlanStageMetrics> qualityStages
             ) {
-                return PlanProcessorService.this.localRescueBeforeRetryIfValid(
+                return PlanDraft.fromResponse(PlanProcessorService.this.localRescueBeforeRetryIfValid(
                         req,
-                        draft,
+                        draft == null ? null : draft.toResponse(),
                         validationIssues,
                         stageSummary,
                         timingSummary,
                         qualityStages
-                );
+                ));
             }
 
             @Override
             PlanRepairPipelineService.DeterministicFallbackResult deterministicRepairIfValid(
                     CreatePlanReq req,
-                    PlanDraftResponse draft,
+                    PlanDraft draft,
                     List<String> validationIssues,
                     String attemptLabel,
                     StringBuilder stageSummary,
                     StringBuilder timingSummary,
                     List<PlanStageMetrics> qualityStages
             ) {
-                return PlanProcessorService.this.deterministicRepairIfValid(
+                PlanRepairPipelineService.DeterministicFallbackResult result = PlanProcessorService.this.deterministicRepairIfValid(
                         req,
-                        draft,
+                        draft == null ? null : draft.toResponse(),
                         validationIssues,
                         attemptLabel,
                         stageSummary,
                         timingSummary,
                         qualityStages
                 );
+                return new PlanRepairPipelineService.DeterministicFallbackResult(
+                        PlanDraft.fromResponse(result.draft().toResponse()),
+                        result.validationIssues(),
+                        result.accepted()
+                );
             }
 
             @Override
             PlanRepairPipelineService.DeterministicFallbackResult deterministicRetryFallbackIfValid(
                     CreatePlanReq req,
-                    PlanDraftResponse draft,
+                    PlanDraft draft,
                     List<String> validationIssues,
                     StringBuilder stageSummary,
                     StringBuilder timingSummary,
                     List<PlanStageMetrics> qualityStages
             ) {
-                return PlanProcessorService.this.deterministicRetryFallbackIfValid(
+                PlanRepairPipelineService.DeterministicFallbackResult result = PlanProcessorService.this.deterministicRetryFallbackIfValid(
                         req,
-                        draft,
+                        draft == null ? null : draft.toResponse(),
                         validationIssues,
                         stageSummary,
                         timingSummary,
                         qualityStages
                 );
+                return new PlanRepairPipelineService.DeterministicFallbackResult(
+                        PlanDraft.fromResponse(result.draft().toResponse()),
+                        result.validationIssues(),
+                        result.accepted()
+                );
             }
 
             @Override
-            PlanDraftResponse relaxedPaceFallbackIfValid(
-                    PlanDraftResponse draft,
+            PlanDraft relaxedPaceFallbackIfValid(
+                    PlanDraft draft,
                     CreatePlanReq req,
                     List<String> validationIssues
             ) {
-                return PlanProcessorService.this.relaxedPaceFallbackIfValid(draft, req, validationIssues);
+                return PlanDraft.fromResponse(PlanProcessorService.this.relaxedPaceFallbackIfValid(
+                        draft == null ? null : draft.toResponse(), req, validationIssues));
             }
         };
     }
@@ -897,9 +1031,11 @@ public class PlanProcessorService {
             StringBuilder timingSummary
     ) {
         long stageStartedAt = System.currentTimeMillis();
-        draft = pruneFlexibleFoodStops(draft);
+        PlanDraft pruned = planQualityService.pruneFlexibleFoodStops(PlanDraft.fromResponse(draft));
+        draft = pruned == null ? null : pruned.toResponse();
         logPlanStageCounts(stageSummary, attemptLabel, "pre-route-flexible-prune", draft);
-        draft = pruneUnselectedShoppingStops(draft, req);
+        pruned = planQualityService.pruneUnselectedShoppingStops(PlanDraft.fromResponse(draft), req);
+        draft = pruned == null ? null : pruned.toResponse();
         logPlanStageCounts(stageSummary, attemptLabel, "pre-route-shopping-prune", draft);
         draft = normalizeDraftCoordinates(draft);
         logPlanStageCounts(stageSummary, attemptLabel, "pre-route-coordinate", draft);
@@ -924,71 +1060,53 @@ public class PlanProcessorService {
 
         stageStartedAt = System.currentTimeMillis();
         draft = expandThemeParkDiningBreaks(draft);
-        draft = pruneAreaInconsistentFlexibleStops(draft, req);
+        PlanDraft areaPruned = planQualityService.pruneAreaInconsistentFlexibleStops(PlanDraft.fromResponse(draft), req);
+        draft = areaPruned == null ? null : areaPruned.toResponse();
         appendStageTiming(timingSummary, attemptLabel + "/theme-park-area-prune", System.currentTimeMillis() - stageStartedAt);
         logPlanStageCounts(stageSummary, attemptLabel, "pre-route-prune", draft);
         return draft;
     }
 
-    private PlanDraftResponse applyRouteAwareScheduling(
-            PlanDraftResponse draft,
-            String attemptLabel,
-            StringBuilder stageSummary,
-            StringBuilder timingSummary
-    ) {
-        long stageStartedAt = System.currentTimeMillis();
-        draft = normalizeDraftScheduleWithRouteDurations(draft);
-        draft = pruneOutOfRangeThemeParkStops(draft);
-        draft = pruneThemeParkDayTrips(draft);
-        appendStageTiming(timingSummary, attemptLabel + "/route-aware-schedule", System.currentTimeMillis() - stageStartedAt);
-        logPlanStageCounts(stageSummary, attemptLabel, "route-aware-schedule", draft);
-        return draft;
-    }
+    private PostRoutePlanRepairService.Operations postRouteRepairOperations() {
+        return new PostRoutePlanRepairService.Operations() {
+            @Override
+            public java.util.Set<Integer> detectChangedDayIndexes(PlanDraft before, PlanDraft after) {
+                return PlanProcessorService.this.detectChangedDayIndexes(
+                        before == null ? null : before.toResponse(),
+                        after == null ? null : after.toResponse()
+                );
+            }
 
-    private PlanDraftResponse applyPostRouteRepair(
-            PlanDraftResponse draft,
-            CreatePlanReq req,
-            String attemptLabel,
-            StringBuilder stageSummary,
-            StringBuilder timingSummary
-    ) {
-        long stageStartedAt = System.currentTimeMillis();
-        PlanDraftResponse beforePostRouteRepair = draft;
-        draft = pruneFlexibleFoodStops(draft);
-        logPlanStageCounts(stageSummary, attemptLabel, "post-route-flexible-prune", draft);
-        draft = pruneUnselectedShoppingStops(draft, req);
-        logPlanStageCounts(stageSummary, attemptLabel, "post-route-shopping-prune", draft);
-        draft = pruneAreaInconsistentFlexibleStops(draft, req);
-        logPlanStageCounts(stageSummary, attemptLabel, "post-route-area-prune", draft);
-        draft = pruneExcessNonMealStops(draft, req);
-        logPlanStageCounts(stageSummary, attemptLabel, "post-route-excess-prune", draft);
-        java.util.Set<Integer> postRouteChangedDays = detectChangedDayIndexes(beforePostRouteRepair, draft);
-        if (!postRouteChangedDays.isEmpty()) {
-            draft = normalizeDraftScheduleWithRouteDurations(draft, postRouteChangedDays);
-        }
-        logPlanStageCounts(stageSummary, attemptLabel, "post-route-reschedule", draft);
-        PlanDraftResponse beforeDuplicateRepair = draft;
-        draft = repairCrossDayDuplicatePois(draft);
-        java.util.Set<Integer> duplicateRepairChangedDays = detectChangedDayIndexes(beforeDuplicateRepair, draft);
-        if (!duplicateRepairChangedDays.isEmpty()) {
-            draft = normalizeDraftScheduleWithRouteDurations(draft, duplicateRepairChangedDays);
-        }
-        java.util.Set<Integer> changedNarrativeDays = new java.util.LinkedHashSet<>(postRouteChangedDays);
-        changedNarrativeDays.addAll(duplicateRepairChangedDays);
-        logPlanStageCounts(stageSummary, attemptLabel, "post-route-duplicate-repair", draft);
-        PlanDraftResponse beforeTimeSensitiveRepair = draft;
-        draft = repairTimeSensitiveLateStops(draft);
-        changedNarrativeDays.addAll(detectChangedDayIndexes(beforeTimeSensitiveRepair, draft));
-        logPlanStageCounts(stageSummary, attemptLabel, "post-time-sensitive-repair", draft);
-        PlanDraftResponse beforeGapClamp = draft;
-        draft = clampOversizedGaps(draft);
-        java.util.Set<Integer> gapClampChangedDays = detectChangedDayIndexes(beforeGapClamp, draft);
-        changedNarrativeDays.addAll(gapClampChangedDays);
-        logPlanStageCounts(stageSummary, attemptLabel, "post-gap-clamp", draft);
-        draft = rewriteDayNarratives(draft, changedNarrativeDays);
-        appendStageTiming(timingSummary, attemptLabel + "/post-route-prune-narrative", System.currentTimeMillis() - stageStartedAt);
-        logPlanStageCounts(stageSummary, attemptLabel, "final", draft);
-        return draft;
+            @Override
+            public PlanDraft normalizeDraftScheduleWithRouteDurations(PlanDraft draft, java.util.Set<Integer> targetDayIndexes) {
+                return routePlanningService.normalizeScheduleWithRouteDurations(draft, targetDayIndexes);
+            }
+
+            @Override
+            public PlanDraft repairCrossDayDuplicatePois(PlanDraft draft) {
+                return duplicatePoiRepairService.repairCrossDayDuplicatePois(draft);
+            }
+
+            @Override
+            public PlanDraft repairTimeSensitiveLateStops(PlanDraft draft) {
+                return PlanDraft.fromResponse(PlanProcessorService.this.repairTimeSensitiveLateStops(draft == null ? null : draft.toResponse()));
+            }
+
+            @Override
+            public PlanDraft clampOversizedGaps(PlanDraft draft) {
+                return PlanDraft.fromResponse(PlanProcessorService.this.clampOversizedGaps(draft == null ? null : draft.toResponse()));
+            }
+
+            @Override
+            public void appendStageTiming(StringBuilder timingSummary, String stage, long ms) {
+                PlanProcessorService.this.appendStageTiming(timingSummary, stage, ms);
+            }
+
+            @Override
+            public void logPlanStageCounts(StringBuilder stageSummary, String attemptLabel, String stage, PlanDraft draft) {
+                PlanProcessorService.this.logPlanStageCounts(stageSummary, attemptLabel, stage, draft == null ? null : draft.toResponse());
+            }
+        };
     }
 
     private PlanRepairPipelineService.ParseNormalizeResult parseAndNormalize(
@@ -1006,7 +1124,7 @@ public class PlanProcessorService {
         draft = normalizeDraftSchedule(draft);
         appendStageTiming(timingSummary, attemptLabel + "/normalize-schedule", System.currentTimeMillis() - stageStartedAt);
 
-        return new PlanRepairPipelineService.ParseNormalizeResult(draft);
+        return new PlanRepairPipelineService.ParseNormalizeResult(PlanDraft.fromResponse(draft));
     }
 
     private PlanRepairPipelineService.EntityVerificationResult verifyAndRepairEntities(
@@ -1021,61 +1139,37 @@ public class PlanProcessorService {
         appendStageTiming(timingSummary, attemptLabel + "/hotel-verify", System.currentTimeMillis() - stageStartedAt);
         List<String> validationIssues = new ArrayList<>(hotelVerification.issues());
 
-        stageStartedAt = System.currentTimeMillis();
-        var initialVerification = restaurantVerificationService.verifyAndNormalize(draft);
-        draft = initialVerification.draft();
-        appendStageTiming(timingSummary, attemptLabel + "/meal-verify-1", System.currentTimeMillis() - stageStartedAt);
-        if (initialVerification.issues().isEmpty()) {
-            logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
-            return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
-        }
-
-        stageStartedAt = System.currentTimeMillis();
-        PlanDraftResponse repairedAfterInitialVerification = repairMealStops(draft, initialVerification.issues());
-        Map<Integer, java.util.Set<Integer>> initialChangedMealTargets = detectChangedFoodStopIndexes(draft, repairedAfterInitialVerification);
-        draft = repairedAfterInitialVerification;
-        appendStageTiming(timingSummary, attemptLabel + "/meal-repair-1", System.currentTimeMillis() - stageStartedAt);
-        if (!hasChangedMealTargets(initialChangedMealTargets)) {
-            logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
-            validationIssues.addAll(initialVerification.issues());
-            return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
-        }
-
-        stageStartedAt = System.currentTimeMillis();
-        var finalVerification = restaurantVerificationService.verifyAndNormalizeSelective(draft, initialChangedMealTargets);
-        draft = finalVerification.draft();
-        appendStageTiming(timingSummary, attemptLabel + "/meal-verify-2", System.currentTimeMillis() - stageStartedAt);
-        if (finalVerification.issues().isEmpty()) {
-            logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
-            return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
-        }
-
-        stageStartedAt = System.currentTimeMillis();
-        PlanDraftResponse repairedAfterFinalVerification = repairMealStops(draft, finalVerification.issues());
-        Map<Integer, java.util.Set<Integer>> finalChangedMealTargets = detectChangedFoodStopIndexes(draft, repairedAfterFinalVerification);
-        draft = repairedAfterFinalVerification;
-        appendStageTiming(timingSummary, attemptLabel + "/meal-repair-2", System.currentTimeMillis() - stageStartedAt);
-        if (!hasChangedMealTargets(finalChangedMealTargets)) {
-            logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
-            validationIssues.addAll(finalVerification.issues());
-            return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
-        }
-
-        stageStartedAt = System.currentTimeMillis();
-        var settledVerification = restaurantVerificationService.verifyAndNormalizeSelective(draft, finalChangedMealTargets);
-        draft = settledVerification.draft();
-        appendStageTiming(timingSummary, attemptLabel + "/meal-verify-3", System.currentTimeMillis() - stageStartedAt);
-        logPlanStageCounts(stageSummary, attemptLabel, "verified-meals-hotels", draft);
-
-        validationIssues.addAll(settledVerification.issues());
-        return new PlanRepairPipelineService.EntityVerificationResult(draft, validationIssues);
+        MealRepairService.Result mealRepairResult = mealRepairService.verifyAndRepairMeals(
+                draft,
+                validationIssues,
+                attemptLabel,
+                stageSummary,
+                timingSummary,
+                mealRepairOperations()
+        );
+        return new PlanRepairPipelineService.EntityVerificationResult(
+                PlanDraft.fromResponse(mealRepairResult.draft()),
+                mealRepairResult.validationIssues()
+        );
     }
 
-    private boolean hasChangedMealTargets(Map<Integer, java.util.Set<Integer>> changedTargets) {
-        if (changedTargets == null || changedTargets.isEmpty()) {
-            return false;
-        }
-        return changedTargets.values().stream().anyMatch(indexes -> indexes != null && !indexes.isEmpty());
+    private MealRepairService.Operations mealRepairOperations() {
+        return new MealRepairService.Operations() {
+            @Override
+            public PlanDraftResponse normalizeDraftSchedule(PlanDraftResponse draft) {
+                return PlanProcessorService.this.normalizeDraftSchedule(draft);
+            }
+
+            @Override
+            public void appendStageTiming(StringBuilder timingSummary, String stage, long elapsedMs) {
+                PlanProcessorService.this.appendStageTiming(timingSummary, stage, elapsedMs);
+            }
+
+            @Override
+            public void logPlanStageCounts(StringBuilder stageSummary, String attemptLabel, String stage, PlanDraftResponse draft) {
+                PlanProcessorService.this.logPlanStageCounts(stageSummary, attemptLabel, stage, draft);
+            }
+        };
     }
 
     private PlanDraftResponse normalizeDraftSchedule(PlanDraftResponse draft) {
@@ -1107,463 +1201,17 @@ public class PlanProcessorService {
     }
 
     public PlanDraftResponse normalizeDraftScheduleWithRouteDurations(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null) return draft;
-        RouteRecommendationContext ctx = routeSchedulingContext(draft);
-        List<DayPlan> days = normalizeDaysScheduleWithRouteDurations(draft.daysPlan(), ctx, null);
-        return planResponseAssembler.withDays(draft, days);
+        PlanDraft normalized = routePlanningService.normalizeScheduleWithRouteDurations(PlanDraft.fromResponse(draft));
+        return normalized == null ? null : normalized.toResponse();
     }
 
     public PlanDraftResponse normalizeDraftScheduleWithRouteDurations(PlanDraftResponse draft, java.util.Set<Integer> targetDayIndexes) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty() || targetDayIndexes == null || targetDayIndexes.isEmpty()) {
-            return draft;
-        }
-        RouteRecommendationContext ctx = routeSchedulingContext(draft);
-        List<DayPlan> days = normalizeDaysScheduleWithRouteDurations(draft.daysPlan(), ctx, targetDayIndexes);
-        return planResponseAssembler.withDays(draft, days);
-    }
-
-    private RouteRecommendationContext routeSchedulingContext(PlanDraftResponse draft) {
-        int kids = draft == null || draft.party() == null || draft.party().kids() == null ? 0 : draft.party().kids();
-        return new RouteRecommendationContext(kids > 0, null, null);
-    }
-
-    private List<DayPlan> normalizeDaysScheduleWithRouteDurations(
-            List<DayPlan> sourceDays,
-            RouteRecommendationContext ctx,
-            java.util.Set<Integer> targetDayIndexes
-    ) {
-        if (sourceDays == null || sourceDays.isEmpty()) {
-            return List.of();
-        }
-        if (sourceDays.size() == 1) {
-            DayPlan day = sourceDays.getFirst();
-            if (shouldNormalizeRouteAwareDay(day, targetDayIndexes)) {
-                return List.of(normalizeDayScheduleWithRouteDurations(day, ctx));
-            }
-            return sourceDays;
-        }
-
-        ExecutorService executor = Executors.newFixedThreadPool(Math.min(3, sourceDays.size()));
-        try {
-            List<CompletableFuture<DayPlan>> futures = sourceDays.stream()
-                    .map(day -> shouldNormalizeRouteAwareDay(day, targetDayIndexes)
-                            ? CompletableFuture.supplyAsync(() -> normalizeDayScheduleWithRouteDurations(day, ctx), executor)
-                            : CompletableFuture.completedFuture(day))
-                    .toList();
-            return futures.stream().map(this::joinDayPlan).toList();
-        } finally {
-            executor.shutdownNow();
-        }
-    }
-
-    private boolean shouldNormalizeRouteAwareDay(DayPlan day, java.util.Set<Integer> targetDayIndexes) {
-        return day != null && (targetDayIndexes == null || targetDayIndexes.isEmpty() || targetDayIndexes.contains(day.dayIndex()));
-    }
-
-    private DayPlan joinDayPlan(CompletableFuture<DayPlan> future) {
-        try {
-            return future.join();
-        } catch (CompletionException ex) {
-            return null;
-        }
-    }
-
-    private DayPlan normalizeDayScheduleWithRouteDurations(DayPlan day, RouteRecommendationContext ctx) {
-        List<Place> stops = day.stops() == null ? List.of() : new ArrayList<>(day.stops());
-        if (stops.isEmpty()) return day;
-        stops = reorderStopsByTimeSlotIfMealOrderInvalid(stops);
-        List<StopCoordinate> coordinates = resolveStopCoordinatesInParallel(stops);
-        List<Integer> transferMinutes = resolveTransferMinutesInParallel(stops, coordinates, ctx);
-        List<Place> normalized = new ArrayList<>();
-        int previousEnd = DAY_START_MINUTES;
-        for (int i = 0; i < stops.size(); i++) {
-            Place stop = stops.get(i);
-            int stay = resolveStayMinutes(stop);
-            int transfer = i < transferMinutes.size() ? transferMinutes.get(i) : transitionMinutes(i == 0);
-            int rollingStart = previousEnd + transfer;
-            int preferredStart = preferredStartMinutes(stop.timeSlot(), i == 0);
-            int start = chooseScheduledStart(rollingStart, preferredStart, stop);
-            int end = start + stay;
-            normalized.add(copyPlaceWithTimes(stop, formatMinutes(start), formatMinutes(end), stay));
-            previousEnd = end;
-        }
-        return new DayPlan(day.dayIndex(), day.hotel(), normalized, day.theme(), day.morningNote(), day.afternoonNote(), day.eveningNote(), day.note());
+        PlanDraft normalized = routePlanningService.normalizeScheduleWithRouteDurations(PlanDraft.fromResponse(draft), targetDayIndexes);
+        return normalized == null ? null : normalized.toResponse();
     }
 
     public PlanDraftResponse repairMealStops(PlanDraftResponse draft, List<String> issues) {
-        PlanDraftResponse updated = dropInvalidStrictMealStops(draft, issues);
-        updated = restaurantVerificationService.ensureRequiredMeals(updated);
-        return normalizeDraftSchedule(updated);
-    }
-
-    private PlanDraftResponse dropInvalidStrictMealStops(PlanDraftResponse draft, List<String> issues) {
-        if (draft == null || draft.daysPlan() == null || issues == null || issues.isEmpty()) return draft;
-        List<DayPlan> updatedDays = new ArrayList<>();
-        for (DayPlan day : draft.daysPlan()) {
-            List<Integer> dropIdx = collectStrictMealIndexesToDrop(day.dayIndex(), issues);
-            if (dropIdx.isEmpty()) {
-                updatedDays.add(day);
-                continue;
-            }
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            List<Place> updatedStops = new ArrayList<>();
-            for (int i = 0; i < stops.size(); i++) {
-                Place s = stops.get(i);
-                if (dropIdx.contains(i) && isStrictMealStop(s)) continue;
-                updatedStops.add(s);
-            }
-            updatedDays.add(new DayPlan(day.dayIndex(), day.hotel(), updatedStops, day.theme(), day.morningNote(), day.afternoonNote(), day.eveningNote(), day.note()));
-        }
-        return planResponseAssembler.withDays(draft, updatedDays);
-    }
-
-    private Map<Integer, java.util.Set<Integer>> detectChangedFoodStopIndexes(PlanDraftResponse before, PlanDraftResponse after) {
-        Map<Integer, java.util.Set<Integer>> changed = new java.util.LinkedHashMap<>();
-        if (after == null || after.daysPlan() == null || after.daysPlan().isEmpty()) {
-            return changed;
-        }
-        Map<Integer, DayPlan> beforeByDay = before == null || before.daysPlan() == null
-                ? Map.of()
-                : before.daysPlan().stream()
-                .filter(day -> day != null)
-                .collect(Collectors.toMap(
-                        DayPlan::dayIndex,
-                        day -> day,
-                        (left, right) -> left,
-                        java.util.LinkedHashMap::new
-                ));
-        for (DayPlan afterDay : after.daysPlan()) {
-            if (afterDay == null) {
-                continue;
-            }
-            DayPlan beforeDay = beforeByDay.get(afterDay.dayIndex());
-            List<Place> beforeStops = beforeDay == null || beforeDay.stops() == null ? List.of() : beforeDay.stops();
-            List<Place> afterStops = afterDay.stops() == null ? List.of() : afterDay.stops();
-            int max = Math.max(beforeStops.size(), afterStops.size());
-            for (int i = 0; i < max; i++) {
-                Place beforeStop = i < beforeStops.size() ? beforeStops.get(i) : null;
-                Place afterStop = i < afterStops.size() ? afterStops.get(i) : null;
-                if (!isFoodStop(beforeStop) && !isFoodStop(afterStop)) {
-                    continue;
-                }
-                if (foodStopEquivalent(beforeStop, afterStop)) {
-                    continue;
-                }
-                if (afterStop != null && isFoodStop(afterStop)) {
-                    changed.computeIfAbsent(afterDay.dayIndex(), ignored -> new java.util.LinkedHashSet<>()).add(i);
-                }
-                if (beforeStop != null && isFoodStop(beforeStop)) {
-                    int relocatedIndex = findMatchingFoodStopIndex(afterStops, beforeStop);
-                    if (relocatedIndex >= 0) {
-                        changed.computeIfAbsent(afterDay.dayIndex(), ignored -> new java.util.LinkedHashSet<>()).add(relocatedIndex);
-                    }
-                }
-            }
-        }
-        return changed;
-    }
-
-    private int findMatchingFoodStopIndex(List<Place> stops, Place target) {
-        if (stops == null || stops.isEmpty() || target == null || !isFoodStop(target)) {
-            return -1;
-        }
-        for (int i = 0; i < stops.size(); i++) {
-            Place candidate = stops.get(i);
-            if (!isFoodStop(candidate)) {
-                continue;
-            }
-            if (foodStopEquivalent(target, candidate)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private java.util.Set<Integer> detectChangedDayIndexes(PlanDraftResponse before, PlanDraftResponse after) {
-        java.util.Set<Integer> changed = new java.util.LinkedHashSet<>();
-        Map<Integer, DayPlan> beforeByDay = before == null || before.daysPlan() == null
-                ? Map.of()
-                : before.daysPlan().stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toMap(
-                        DayPlan::dayIndex,
-                        day -> day,
-                        (left, right) -> left,
-                        java.util.LinkedHashMap::new
-                ));
-        Map<Integer, DayPlan> afterByDay = after == null || after.daysPlan() == null
-                ? Map.of()
-                : after.daysPlan().stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toMap(
-                        DayPlan::dayIndex,
-                        day -> day,
-                        (left, right) -> left,
-                        java.util.LinkedHashMap::new
-                ));
-        java.util.Set<Integer> dayIndexes = new java.util.LinkedHashSet<>();
-        dayIndexes.addAll(beforeByDay.keySet());
-        dayIndexes.addAll(afterByDay.keySet());
-        for (Integer dayIndex : dayIndexes) {
-            if (!Objects.equals(daySnapshot(beforeByDay.get(dayIndex)), daySnapshot(afterByDay.get(dayIndex)))) {
-                changed.add(dayIndex);
-            }
-        }
-        return changed;
-    }
-
-    private String daySnapshot(DayPlan day) {
-        if (day == null) {
-            return "";
-        }
-        return day.dayIndex() + ":"
-                + (day.stops() == null ? "" : day.stops().stream()
-                .map(stop -> safeStopName(stop)
-                        + "@"
-                        + nullToEmpty(stop.startTime())
-                        + "-"
-                        + nullToEmpty(stop.endTime())
-                        + "#"
-                        + nullToEmpty(stop.category())
-                        + "#"
-                        + nullToEmpty(stop.timeSlot()))
-                .collect(Collectors.joining("|")));
-    }
-
-    private boolean foodStopEquivalent(Place left, Place right) {
-        if (left == right) {
-            return true;
-        }
-        if (left == null || right == null) {
-            return false;
-        }
-        return normalizeSlot(left.name()).equals(normalizeSlot(right.name()))
-                && normalizeSlot(left.addressLine()).equals(normalizeSlot(right.addressLine()))
-                && normalizeSlot(left.category()).equals(normalizeSlot(right.category()))
-                && normalizeSlot(left.timeSlot()).equals(normalizeSlot(right.timeSlot()))
-                && normalizeSlot(left.mealType()).equals(normalizeSlot(right.mealType()))
-                && normalizeSlot(left.preferredArea()).equals(normalizeSlot(right.preferredArea()))
-                && normalizeSlot(left.city()).equals(normalizeSlot(right.city()))
-                && normalizeSlot(left.suburb()).equals(normalizeSlot(right.suburb()))
-                && normalizeSlot(left.businessStatus()).equals(normalizeSlot(right.businessStatus()));
-    }
-
-    private List<Integer> collectStrictMealIndexesToDrop(int dayIdx, List<String> issues) {
-        List<Integer> idxs = new ArrayList<>();
-        for (String iss : issues) {
-            var m = STOP_ISSUE_PATTERN.matcher(iss);
-            if (m.matches() && Integer.parseInt(m.group(1)) == dayIdx && isReplaceableStrictMealIssue(m.group(3))) {
-                int zIdx = Integer.parseInt(m.group(2)) - 1;
-                if (!idxs.contains(zIdx)) idxs.add(zIdx);
-            }
-        }
-        return idxs;
-    }
-
-    private boolean isReplaceableStrictMealIssue(String issue) {
-        return "google-places-low-confidence".equals(issue)
-                || "google-places-no-match".equals(issue)
-                || "google-places-area-not-venue".equals(issue)
-                || "google-places-meal-not-suitable".equals(issue)
-                || "google-places-not-food".equals(issue)
-                || "google-places-closed".equals(issue);
-    }
-
-    private int minNonMealStopsPerDay(String pace) {
-        return paceNonMealRange(pace).min();
-    }
-
-    private boolean hasThemeParkBeforeIndex(List<Place> stops, int index) {
-        for (int i = 0; i < index; i++) {
-            if (isThemeParkLikeStop(stops.get(i))) return true;
-        }
-        return false;
-    }
-
-    public static final int DINNER_EARLIEST_START_MINUTES = 17 * 60 + 30;
-
-    public List<String> validateDraft(PlanDraftResponse draft) {
-        return validateDraft(draft, null);
-    }
-
-    public List<String> validateDraft(PlanDraftResponse draft, CreatePlanReq req) {
-        return validateDraft(draft, req, skeletonContext(req, draft));
-    }
-
-    private List<String> validateDraft(
-            PlanDraftResponse draft,
-            CreatePlanReq req,
-            DaySkeletonContext skeletonContext
-    ) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return List.of("missing-days");
-        }
-
-        List<String> issues = new ArrayList<>();
-        issues.addAll(validateRequestedDayCount(draft, req));
-        int minNonMealStops = minNonMealStopsPerDay(draft.pace());
-        Map<Integer, Integer> effectiveMinNonMealStopsByDay = effectiveMinNonMealStopsByDay(skeletonContext, minNonMealStops);
-        boolean hasThemeParkDay = draft.daysPlan().stream()
-                .anyMatch(day -> day.stops() != null && day.stops().stream().anyMatch(this::isThemeParkLikeStop));
-        
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            boolean themeParkDay = stops.stream().anyMatch(this::isThemeParkLikeStop);
-            int skeletonEffectiveMin = effectiveMinNonMealStopsByDay.getOrDefault(day.dayIndex(), minNonMealStops);
-            int dayMinNonMealStops = hasThemeParkDay ? Math.min(skeletonEffectiveMin, 2) : skeletonEffectiveMin;
-            if (countNonMealStops(stops) < dayMinNonMealStops && stops.stream().noneMatch(this::isThemeParkLikeStop)) {
-                addValidationIssue(issues, "day-" + day.dayIndex() + "-too-few-non-meal-stops", day.dayIndex(), -1, null, null,
-                        "nonMeal=" + countNonMealStops(stops) + " min=" + dayMinNonMealStops + " defaultMin=" + minNonMealStops);
-            }
-            boolean hasLunch = stops.stream().anyMatch(stop -> hasMealSlot(stop, "lunch"));
-            boolean hasDinner = stops.stream().anyMatch(stop -> hasMealSlot(stop, "dinner"));
-            if (!hasLunch) addValidationIssue(issues, "day-" + day.dayIndex() + "-missing-lunch", day.dayIndex(), -1, null, null, "strict lunch slot missing");
-            if (!hasDinner) addValidationIssue(issues, "day-" + day.dayIndex() + "-missing-dinner", day.dayIndex(), -1, null, null, "strict dinner slot missing");
-            if (hasLunch && stops.stream().noneMatch(stop -> hasVerifiedMealStop(stop, "lunch"))) {
-                addValidationIssue(issues, "day-" + day.dayIndex() + "-missing-real-lunch", day.dayIndex(), -1, null, null, "lunch exists but no verified food venue");
-            }
-            if (hasDinner && stops.stream().noneMatch(stop -> hasVerifiedMealStop(stop, "dinner"))) {
-                addValidationIssue(issues, "day-" + day.dayIndex() + "-missing-real-dinner", day.dayIndex(), -1, null, null, "dinner exists but no verified food venue");
-            }
-
-            int previousEnd = -1;
-            for (int i = 0; i < stops.size(); i++) {
-                Place stop = stops.get(i);
-                int start = parseTimeMinutes(stop.startTime());
-                int end = parseTimeMinutes(stop.endTime());
-                if (start < 0 || end < 0) {
-                    addValidationIssue(issues, "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-invalid-time", day.dayIndex(), i + 1, stop, null,
-                            "start=" + stop.startTime() + " end=" + stop.endTime());
-                    continue;
-                }
-                if (end <= start) {
-                    addValidationIssue(issues, "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-reversed-time", day.dayIndex(), i + 1, stop, null,
-                            "start=" + stop.startTime() + " end=" + stop.endTime());
-                }
-                Integer stayMinutes = stop.stayMinutes();
-                if (stayMinutes != null && stayMinutes > 0) {
-                    int delta = Math.abs((end - start) - stayMinutes);
-                    if (delta > 20) {
-                        addValidationIssue(issues, "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-duration-mismatch", day.dayIndex(), i + 1, stop, null,
-                                "stayMinutes=" + stayMinutes + " actual=" + (end - start) + " delta=" + delta);
-                    }
-                }
-                if (previousEnd >= 0 && start < previousEnd) {
-                    addValidationIssue(issues, "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-chronology-error", day.dayIndex(), i + 1, stop, stops.get(i - 1),
-                            "previousEnd=" + formatMinutes(previousEnd) + " currentStart=" + stop.startTime());
-                }
-                if (previousEnd >= 0) {
-                    int actualGap = start - previousEnd;
-                    int allowedGap = maxAllowedGapMinutes(stops.get(i - 1), stop, i == stops.size() - 1, previousEnd);
-                    if (actualGap > allowedGap) {
-                        addValidationIssue(issues, "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-gap-too-large", day.dayIndex(), i + 1, stop, stops.get(i - 1),
-                                "actualGap=" + actualGap + " allowedGap=" + allowedGap);
-                    }
-                }
-                int latestLunchStart = themeParkDay
-                        ? THEME_PARK_DAY_LUNCH_LATEST_START_MINUTES
-                        : LUNCH_LATEST_START_MINUTES;
-                if (hasMealSlot(stop, "lunch") && (start < LUNCH_EARLIEST_START_MINUTES || start > latestLunchStart)) {
-                    addValidationIssue(issues, "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-lunch-time-invalid", day.dayIndex(), i + 1, stop, null,
-                            "start=" + stop.startTime() + " allowed=" + formatMinutes(LUNCH_EARLIEST_START_MINUTES) + "-" + formatMinutes(latestLunchStart));
-                }
-                int latestDinnerStart = hasThemeParkBeforeIndex(stops, i)
-                        ? THEME_PARK_DAY_DINNER_LATEST_START_MINUTES
-                        : DINNER_LATEST_START_MINUTES;
-                if (hasMealSlot(stop, "dinner") && (start < DINNER_EARLIEST_START_MINUTES || start > latestDinnerStart)) {
-                    addValidationIssue(issues, "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-dinner-time-invalid", day.dayIndex(), i + 1, stop, null,
-                            "start=" + stop.startTime() + " allowed=" + formatMinutes(DINNER_EARLIEST_START_MINUTES) + "-" + formatMinutes(latestDinnerStart));
-                }
-                if (hasMealSlot(stop, "dinner")
-                        && hasThemeParkBeforeIndex(stops, i)
-                        && start > THEME_PARK_DAY_DINNER_LATEST_START_MINUTES) {
-                    addValidationIssue(issues, "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-theme-park-dinner-too-late", day.dayIndex(), i + 1, stop, null,
-                            "start=" + stop.startTime() + " latest=" + formatMinutes(THEME_PARK_DAY_DINNER_LATEST_START_MINUTES));
-                }
-                issues.addAll(validateTimeSensitiveStop(day.dayIndex(), i + 1, stop, start, end));
-                issues.addAll(validateThemeParkLocation(draft.city(), day.dayIndex(), i + 1, stop));
-                previousEnd = Math.max(previousEnd, end);
-            }
-        }
-        issues.addAll(validateSameDayDuplicatePois(draft));
-        issues.addAll(validateCrossDayDuplicatePois(draft));
-        issues.addAll(validateSelectedStyleCoverage(draft, req));
-        return issues;
-    }
-
-    private List<String> validateSameDayDuplicatePois(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return List.of();
-        }
-        List<String> issues = new ArrayList<>();
-        for (DayPlan day : draft.daysPlan()) {
-            if (day == null || day.stops() == null || day.stops().isEmpty()) {
-                continue;
-            }
-            Map<String, SeenPoiStop> seenStops = new java.util.LinkedHashMap<>();
-            for (int i = 0; i < day.stops().size(); i++) {
-                Place stop = day.stops().get(i);
-                List<String> duplicateKeys = crossDayDuplicatePoiKeys(stop);
-                if (duplicateKeys.isEmpty()) {
-                    continue;
-                }
-                SeenPoiStop firstSeen = findSeenPoi(duplicateKeys, seenStops);
-                if (firstSeen == null) {
-                    registerSeenPoiKeys(duplicateKeys, new SeenPoiStop(day.dayIndex(), i + 1, stop.name()), seenStops);
-                    continue;
-                }
-                addValidationIssue(
-                        issues,
-                        "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-duplicate-poi-same-day",
-                        day.dayIndex(),
-                        i + 1,
-                        stop,
-                        null,
-                        "duplicateWith=day-" + firstSeen.dayIndex() + "-stop-" + firstSeen.stopIndex() + " name=" + firstSeen.stopName()
-                );
-            }
-        }
-        return issues;
-    }
-
-    private List<String> validateCrossDayDuplicatePois(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return List.of();
-        }
-        List<String> issues = new ArrayList<>();
-        Map<String, SeenPoiStop> seenStops = new java.util.LinkedHashMap<>();
-        for (DayPlan day : draft.daysPlan()) {
-            if (day == null || day.stops() == null || day.stops().isEmpty()) {
-                continue;
-            }
-            for (int i = 0; i < day.stops().size(); i++) {
-                Place stop = day.stops().get(i);
-                List<String> duplicateKeys = crossDayDuplicatePoiKeys(stop);
-                if (duplicateKeys.isEmpty()) {
-                    continue;
-                }
-                SeenPoiStop firstSeen = findCrossDaySeenPoi(duplicateKeys, day.dayIndex(), seenStops);
-                if (firstSeen == null) {
-                    registerSeenPoiKeys(duplicateKeys, new SeenPoiStop(day.dayIndex(), i + 1, stop.name()), seenStops);
-                    continue;
-                }
-                addValidationIssue(
-                        issues,
-                        "day-" + day.dayIndex() + "-stop-" + (i + 1) + "-duplicate-poi-across-days",
-                        day.dayIndex(),
-                        i + 1,
-                        stop,
-                        null,
-                        "duplicateWith=day-" + firstSeen.dayIndex() + "-stop-" + firstSeen.stopIndex() + " name=" + firstSeen.stopName()
-                );
-            }
-        }
-        return issues;
-    }
-
-    private String crossDayDuplicatePoiKey(Place stop) {
-        List<String> keys = crossDayDuplicatePoiKeys(stop);
-        return keys.isEmpty() ? "" : keys.get(0);
+        return mealRepairService.repairMealStops(draft, issues, mealRepairOperations());
     }
 
     private List<String> crossDayDuplicatePoiKeys(Place stop) {
@@ -1602,19 +1250,6 @@ public class PlanProcessorService {
         for (String key : duplicateKeys) {
             SeenPoiStop seen = seenStops.get(key);
             if (seen != null && seen.dayIndex() != dayIndex) {
-                return seen;
-            }
-        }
-        return null;
-    }
-
-    private SeenPoiStop findSeenPoi(List<String> duplicateKeys, Map<String, SeenPoiStop> seenStops) {
-        if (duplicateKeys == null || duplicateKeys.isEmpty() || seenStops == null || seenStops.isEmpty()) {
-            return null;
-        }
-        for (String key : duplicateKeys) {
-            SeenPoiStop seen = seenStops.get(key);
-            if (seen != null) {
                 return seen;
             }
         }
@@ -1660,108 +1295,8 @@ public class PlanProcessorService {
         return String.format(Locale.ROOT, "%.4f,%.4f", stop.latitude(), stop.longitude());
     }
 
-    private void addValidationIssue(List<String> issues, String issue, int dayIndex, int stopIndex, Place stop, Place previousStop, String detail) {
-        issues.add(issue);
-        if (log.isDebugEnabled()) {
-            log.debug("Validation issue code={} day={} stopIndex={} stop={} previous={} detail={}",
-                    issue,
-                    dayIndex,
-                    stopIndex,
-                    safeStopName(stop),
-                    safeStopName(previousStop),
-                    detail);
-        }
-    }
-
     private String safeStopName(Place stop) {
         return stop == null || stop.name() == null ? "" : stop.name();
-    }
-
-    private List<String> validateSelectedStyleCoverage(PlanDraftResponse draft, CreatePlanReq req) {
-        if (draft == null || draft.daysPlan() == null || req == null || req.style() == null || req.style().isEmpty()) {
-            return List.of();
-        }
-        List<Place> stops = draft.daysPlan().stream()
-                .filter(day -> day != null && day.stops() != null)
-                .flatMap(day -> day.stops().stream())
-                .toList();
-        List<String> issues = new ArrayList<>();
-        for (String style : req.style()) {
-            String normalized = normalizeSlot(style);
-            if (normalized.isBlank()) {
-                continue;
-            }
-            boolean covered = switch (normalized) {
-                case "market_shopping" -> stops.stream().anyMatch(this::isMarketShoppingLikeStop);
-                case "theme_park" -> stops.stream().anyMatch(this::isThemeParkLikeStop);
-                case "nature" -> stops.stream().anyMatch(this::isNatureCoverageStop);
-                case "culture" -> stops.stream().anyMatch(this::isCultureCoverageStop);
-                default -> true;
-            };
-            if (!covered) {
-                String issue = "style-missing-" + normalized.replace('_', '-');
-                if (isSoftMissingMarketShoppingUnderThemePark(normalized, stops, req)) {
-                    logSoftValidationDiagnostic("style-soft-missing-market-shopping-after-theme-prune",
-                            "requestedStyle=" + normalized + " reason=theme_park_route_cluster_priority");
-                    continue;
-                }
-                addValidationIssue(issues, issue, -1, -1, null, null, "requestedStyle=" + normalized);
-            }
-        }
-        return issues;
-    }
-
-    private boolean isSoftMissingMarketShoppingUnderThemePark(String normalizedStyle, List<Place> stops, CreatePlanReq req) {
-        if (!"market_shopping".equals(normalizedStyle) || stops == null || stops.stream().noneMatch(this::isThemeParkLikeStop)) {
-            return false;
-        }
-        return req != null && req.style() != null && req.style().stream()
-                .map(this::normalizeSlot)
-                .anyMatch("theme_park"::equals);
-    }
-
-    private void logSoftValidationDiagnostic(String code, String detail) {
-        if (log.isDebugEnabled()) {
-            log.debug("Validation diagnostic code={} detail={}", code, detail);
-        }
-    }
-
-    private boolean isNatureCoverageStop(Place stop) {
-        if (stop == null || isStrictMealStop(stop)) {
-            return false;
-        }
-        String category = normalizeSlot(stop.category());
-        String text = normalizeSlot(joinText(stop.name(), stop.category(), stop.suburb(), stop.preferredArea()));
-        return "park".equals(category)
-                || "nature".equals(category)
-                || text.contains("garden")
-                || text.contains("botanic")
-                || text.contains("beach")
-                || text.contains("lookout")
-                || text.contains("reserve")
-                || text.contains("trail")
-                || text.contains("river")
-                || text.contains("coastal")
-                || text.contains("foreshore");
-    }
-
-    private boolean isCultureCoverageStop(Place stop) {
-        if (stop == null || isStrictMealStop(stop)) {
-            return false;
-        }
-        String category = normalizeSlot(stop.category());
-        String text = normalizeSlot(joinText(stop.name(), stop.category(), stop.suburb(), stop.preferredArea()));
-        return "museum".equals(category)
-                || "gallery".equals(category)
-                || "heritage".equals(category)
-                || text.contains("museum")
-                || text.contains("gallery")
-                || text.contains("heritage")
-                || text.contains("library")
-                || text.contains("memorial")
-                || text.contains("shrine")
-                || text.contains("cultural")
-                || text.contains("historic");
     }
 
     private String joinText(String... parts) {
@@ -1792,118 +1327,6 @@ public class PlanProcessorService {
         return sb.toString();
     }
 
-    private List<String> validateRequestedDayCount(PlanDraftResponse draft, CreatePlanReq req) {
-        if (draft == null || req == null || req.days() < 1 || draft.daysPlan() == null) {
-            return List.of();
-        }
-        int expectedDays = req.days();
-        int actualDays = draft.daysPlan().size();
-        Integer declaredDays = draft.days();
-        List<String> issues = new ArrayList<>();
-        if (actualDays != expectedDays) {
-            issues.add("expected-" + expectedDays + "-days-but-got-" + actualDays);
-        }
-        if (declaredDays != null && declaredDays > 0 && declaredDays != expectedDays) {
-            issues.add("declared-days-" + declaredDays + "-does-not-match-request-" + expectedDays);
-        }
-        return issues;
-    }
-
-    private String retryInstruction(
-            CreatePlanReq req,
-            List<String> validationIssues,
-            DaySkeletonContext skeletonContext
-    ) {
-        return retryInstruction(req, validationIssues, skeletonContext, null);
-    }
-
-    private String retryInstruction(
-            CreatePlanReq req,
-            List<String> validationIssues,
-            DaySkeletonContext skeletonContext,
-            PlanDraftResponse failedDraft
-    ) {
-        int requestedDays = req == null ? 0 : req.days();
-        String dayInstruction = requestedDays > 0
-                ? " Please return exactly " + requestedDays + " days: days=" + requestedDays + " and daysPlan length=" + requestedDays + "."
-                : "";
-        String issueInstruction = buildWholePlanIssueRetryInstruction(validationIssues);
-        String duplicateInstruction = buildWholePlanDuplicateRetryInstruction(validationIssues);
-        String skeletonInstruction = compactRetrySkeletonHints(skeletonContext, validationIssues);
-        String skeletonClause = skeletonInstruction.isBlank()
-                ? ""
-                : " Follow these day-level skeleton constraints strictly: " + skeletonInstruction + ".";
-        String scopedRepairClause = buildWholePlanScopedRetryInstruction(failedDraft, validationIssues, skeletonContext);
-        String stableFieldClause = buildWholePlanStableFieldInstruction(failedDraft, validationIssues);
-        String hardConstraintClause = " Hard constraints: include exactly one real lunch and one real dinner per day, keep adjacent stop gaps tight, keep non-meal sightseeing POIs unique across days, and avoid remote district out-and-back routing on the same day.";
-        String compactOutputClause = " Keep all strings minimal. Use the shortest valid title, overview, theme, note, reason, and tip text that still satisfies the schema. Do not expand unchanged content.";
-        return "Please generate a valid itinerary."
-                + hardConstraintClause
-                + compactOutputClause
-                + dayInstruction
-                + issueInstruction
-                + duplicateInstruction
-                + scopedRepairClause
-                + stableFieldClause
-                + skeletonClause;
-    }
-
-    private String buildWholePlanIssueRetryInstruction(List<String> validationIssues) {
-        if (validationIssues == null || validationIssues.isEmpty()) {
-            return "";
-        }
-        List<String> normalizedIssues = validationIssues.stream()
-                .filter(issue -> issue != null && !issue.isBlank())
-                .distinct()
-                .toList();
-        if (normalizedIssues.isEmpty()) {
-            return "";
-        }
-        int cappedSize = Math.min(RETRY_ISSUE_SUMMARY_LIMIT, normalizedIssues.size());
-        String summary = String.join(", ", normalizedIssues.subList(0, cappedSize));
-        if (normalizedIssues.size() > cappedSize) {
-            summary = summary + ", ...(+" + (normalizedIssues.size() - cappedSize) + " more)";
-        }
-        return " Fix these highest-priority validation issues first: "
-                + trimToMaxChars(summary, RETRY_ISSUE_SUMMARY_MAX_CHARS)
-                + ".";
-    }
-
-    private String compactRetrySkeletonHints(DaySkeletonContext skeletonContext, List<String> validationIssues) {
-        if (skeletonContext == null) {
-            return "";
-        }
-        List<Integer> dayIndexes = extractRetryDayIndexes(validationIssues);
-        if (dayIndexes.isEmpty()) {
-            return trimToMaxChars(skeletonContext.promptHintsText(), RETRY_SKELETON_HINTS_MAX_CHARS);
-        }
-        List<Integer> scopedDays = dayIndexes.stream()
-                .distinct()
-                .sorted()
-                .limit(RETRY_SKELETON_DAY_HINTS_LIMIT)
-                .toList();
-        List<String> dayHints = scopedDays.stream()
-                .map(skeletonContext::promptHintForDay)
-                .filter(hint -> hint != null && !hint.isBlank())
-                .toList();
-        if (dayHints.isEmpty()) {
-            return trimToMaxChars(skeletonContext.promptHintsText(), RETRY_SKELETON_HINTS_MAX_CHARS);
-        }
-        String compact = String.join("; ", dayHints);
-        if (dayIndexes.size() > scopedDays.size()) {
-            compact = compact + "; ...(+" + (dayIndexes.size() - scopedDays.size()) + " more days)";
-        }
-        return trimToMaxChars(compact, RETRY_SKELETON_HINTS_MAX_CHARS);
-    }
-
-    private String trimToMaxChars(String value, int maxChars) {
-        if (value == null || value.isBlank() || maxChars <= 0 || value.length() <= maxChars) {
-            return value == null ? "" : value;
-        }
-        int end = Math.max(0, maxChars - 3);
-        return value.substring(0, end).trim() + "...";
-    }
-
     private PlanDraftResponse retryFailedDaysPhased(
             CreatePlanReq req,
             PlanDraftResponse failedDraft,
@@ -1931,7 +1354,13 @@ public class PlanProcessorService {
             if (dayIssues == null || dayIssues.isEmpty()) {
                 continue;
             }
-            retryInstructionsByDay.put(dayIndex, retryInstructionForDay(dayIndex, dayIssues, failedDraft, skeletonContext));
+            retryInstructionsByDay.put(dayIndex, planRetryInstructionService.dayInstruction(
+                    dayIndex,
+                    dayIssues,
+                    failedDraft,
+                    retrySkeletonHints(skeletonContext),
+                    retryInstructionOperations()
+            ));
         }
         if (retryInstructionsByDay.isEmpty()) {
             return null;
@@ -2044,260 +1473,15 @@ public class PlanProcessorService {
     }
 
     private List<Integer> extractRetryDayIndexes(List<String> validationIssues) {
-        if (validationIssues == null || validationIssues.isEmpty()) {
-            return List.of();
-        }
-        List<Integer> dayIndexes = new ArrayList<>();
-        for (String issue : validationIssues) {
-            Integer dayIndex = extractDayIndex(issue);
-            if (dayIndex == null || dayIndex < 1) {
-                continue;
-            }
-            if (!dayIndexes.contains(dayIndex)) {
-                dayIndexes.add(dayIndex);
-            }
-        }
-        return dayIndexes;
+        return planRetryInstructionService.extractRetryDayIndexes(validationIssues);
     }
 
     private Map<Integer, List<String>> groupIssuesByDay(List<String> validationIssues) {
-        Map<Integer, List<String>> issuesByDay = new java.util.LinkedHashMap<>();
-        if (validationIssues == null || validationIssues.isEmpty()) {
-            return issuesByDay;
-        }
-        for (String issue : validationIssues) {
-            Integer dayIndex = extractDayIndex(issue);
-            if (dayIndex == null || dayIndex < 1) {
-                continue;
-            }
-            issuesByDay.computeIfAbsent(dayIndex, key -> new ArrayList<>()).add(issue);
-        }
-        return issuesByDay;
+        return planRetryInstructionService.groupIssuesByDay(validationIssues);
     }
 
     private Integer extractDayIndex(String issue) {
-        if (issue == null || !issue.startsWith("day-")) {
-            return null;
-        }
-        int secondDash = issue.indexOf('-', 4);
-        if (secondDash < 0) {
-            return null;
-        }
-        String token = issue.substring(4, secondDash);
-        try {
-            return Integer.parseInt(token);
-        } catch (NumberFormatException ex) {
-            return null;
-        }
-    }
-
-    private String retryInstructionForDay(
-            int dayIndex,
-            List<String> dayIssues,
-            PlanDraftResponse failedDraft,
-            DaySkeletonContext skeletonContext
-    ) {
-        String issueInstruction = buildRetryIssueInstructionForDay(dayIndex, dayIssues, failedDraft);
-        String dayContext = buildRetryDayContext(failedDraft, dayIndex, skeletonContext);
-        String contextClause = dayContext.isBlank()
-                ? ""
-                : " Current day context: " + dayContext + ".";
-        String preservationClause = buildRetryPreservationInstruction(failedDraft, dayIndex, dayIssues);
-        String skeletonInstruction = skeletonContext.promptHintForDay(dayIndex);
-        String skeletonClause = skeletonInstruction.isBlank()
-                ? ""
-                : " Follow this day skeleton strictly: " + skeletonInstruction + ".";
-        return "Please regenerate only day " + dayIndex + " as a valid itinerary day."
-                + preservationClause
-                + contextClause
-                + issueInstruction
-                + skeletonClause;
-    }
-
-    private String retryInstructionForWholePlanDay(
-            int dayIndex,
-            List<String> dayIssues,
-            PlanDraftResponse failedDraft,
-            DaySkeletonContext skeletonContext,
-            String nonDayIssueInstruction
-    ) {
-        String baseInstruction = retryInstructionForDay(dayIndex, dayIssues, failedDraft, skeletonContext);
-        String wholeTripClause = nonDayIssueInstruction == null || nonDayIssueInstruction.isBlank()
-                ? ""
-                : " " + nonDayIssueInstruction;
-        String compactClause = " Keep strings minimal and do not rewrite already-valid content unless needed to resolve the listed whole-trip issues.";
-        return baseInstruction + wholeTripClause + compactClause;
-    }
-
-    private String buildRetryIssueInstructionForDay(int dayIndex, List<String> dayIssues, PlanDraftResponse failedDraft) {
-        if (dayIssues == null || dayIssues.isEmpty()) {
-            return "";
-        }
-        List<String> instructions = new ArrayList<>();
-        if (hasAnyIssue(dayIssues, "-missing-lunch")) {
-            instructions.add("Add exactly one real lunch venue in the midday window with category restaurant, cafe, food, or dining.");
-        }
-        if (hasAnyIssue(dayIssues, "-missing-dinner")) {
-            instructions.add("Add exactly one real dinner venue in the evening window with category restaurant, cafe, food, or dining.");
-        }
-        if (hasAnyIssue(dayIssues, "-too-few-non-meal-stops")) {
-            instructions.add("Increase the number of non-meal stops for this day until it satisfies the skeleton effective range, while keeping the route compact.");
-        }
-        if (hasAnyIssue(dayIssues, "-duplicate-poi-across-days")) {
-            instructions.add("Replace any stop that duplicates a POI already used on another day with a different real POI in the same area and of a similar visit type. Do not reuse the same attraction, museum, park, lookout, or landmark across multiple days unless no realistic alternative exists.");
-            String duplicateDetail = buildDayDuplicateRetryInstruction(dayIndex, failedDraft);
-            if (!duplicateDetail.isBlank()) {
-                instructions.add(duplicateDetail);
-            }
-        }
-        if (hasAnyIssue(dayIssues, "-duplicate-poi-same-day")) {
-            instructions.add("Remove or replace same-day duplicate POIs so each attraction, museum, park, lookout, or landmark appears at most once within this day.");
-        }
-        if (hasAnyIssue(dayIssues, "-gap-too-large")) {
-            instructions.add("Tighten the schedule so adjacent stops do not have oversized idle gaps; prefer compact same-area sequencing.");
-        }
-        if (hasAnyIssue(dayIssues, "-time-sensitive-too-early")) {
-            instructions.add("Move time-sensitive stops later into a suitable window without creating oversized gaps.");
-        }
-        if (hasAnyIssue(dayIssues, "-time-sensitive-too-late")) {
-            instructions.add("Move time-sensitive stops earlier so they occur within suitable operating hours and do not drift late in the day.");
-        }
-        if (hasAnyIssue(dayIssues, "-time-sensitive-slot-mismatch")) {
-            instructions.add("Retime or replace the mismatched stop so its slot and time window fit the venue type.");
-        }
-        if (hasAnyIssue(dayIssues, "-lunch-time-invalid")) {
-            instructions.add("Keep lunch start time inside 11:15-13:00 unless this is a theme-park day.");
-        }
-        if (hasAnyIssue(dayIssues, "-dinner-time-invalid")) {
-            instructions.add("Keep dinner start time inside 17:30-20:00 unless this is a theme-park day.");
-        }
-        if (hasAnyIssue(dayIssues, "-theme-park-cross-city")) {
-            instructions.add("Keep the theme-park day in one remote cluster only. Remove any cross-city jump that leaves the cluster and then returns later.");
-        }
-        if (instructions.isEmpty()) {
-            return " Fix these validation issues for day " + dayIndex + ": " + String.join(", ", dayIssues) + ".";
-        }
-        return " For day " + dayIndex + ", apply all of these corrections: " + String.join(" ", instructions);
-    }
-
-    private String buildWholePlanDuplicateRetryInstruction(List<String> validationIssues) {
-        if (!hasAnyIssue(validationIssues, "-duplicate-poi-across-days")) {
-            return "";
-        }
-        return " Eliminate all cross-day duplicate POIs. Every non-meal attraction, museum, park, lookout, landmark, or similar sightseeing stop must appear on only one day.";
-    }
-
-    private String buildWholePlanNonDayIssueInstruction(List<String> validationIssues) {
-        if (validationIssues == null || validationIssues.isEmpty()) {
-            return "";
-        }
-        List<String> nonDayIssues = validationIssues.stream()
-                .filter(issue -> issue != null && !issue.isBlank())
-                .filter(issue -> extractDayIndex(issue) == null)
-                .distinct()
-                .limit(RETRY_ISSUE_SUMMARY_LIMIT)
-                .toList();
-        String duplicateInstruction = buildWholePlanDuplicateRetryInstruction(validationIssues);
-        if (nonDayIssues.isEmpty()) {
-            return duplicateInstruction.isBlank() ? "" : duplicateInstruction.trim();
-        }
-        String summary = trimToMaxChars(String.join(", ", nonDayIssues), RETRY_ISSUE_SUMMARY_MAX_CHARS);
-        if (duplicateInstruction.isBlank()) {
-            return "Help resolve these whole-trip issues while keeping this day stable: " + summary + ".";
-        }
-        return "Help resolve these whole-trip issues while keeping this day stable: "
-                + summary
-                + ". "
-                + duplicateInstruction.trim();
-    }
-
-    private String buildWholePlanScopedRetryInstruction(
-            PlanDraftResponse failedDraft,
-            List<String> validationIssues,
-            DaySkeletonContext skeletonContext
-    ) {
-        if (failedDraft == null || validationIssues == null || validationIssues.isEmpty()) {
-            return "";
-        }
-        List<Integer> scopedDays = extractRetryDayIndexes(validationIssues).stream()
-                .distinct()
-                .sorted()
-                .limit(RETRY_SKELETON_DAY_HINTS_LIMIT)
-                .toList();
-        if (scopedDays.isEmpty()) {
-            return "";
-        }
-        Map<Integer, List<String>> issuesByDay = groupIssuesByDay(validationIssues);
-        List<String> scopedClauses = new ArrayList<>();
-        for (Integer dayIndex : scopedDays) {
-            List<String> dayIssues = issuesByDay.get(dayIndex);
-            if (dayIssues == null || dayIssues.isEmpty()) {
-                continue;
-            }
-            String dayContext = buildRetryDayContext(failedDraft, dayIndex, skeletonContext);
-            String issueInstruction = buildRetryIssueInstructionForDay(dayIndex, dayIssues, failedDraft);
-            String preservation = buildRetryPreservationInstruction(failedDraft, dayIndex, dayIssues);
-            String clause = "day " + dayIndex
-                    + "{context=" + dayContext
-                    + "; fixes=" + issueInstruction
-                    + "; preserve=" + preservation
-                    + "}";
-            scopedClauses.add(clause);
-        }
-        if (scopedClauses.isEmpty()) {
-            return "";
-        }
-        String dayList = scopedDays.stream().map(String::valueOf).collect(Collectors.joining(", "));
-        String scopedSummary = " Prioritize repairing only these failed days first: " + dayList + ". Keep other days unchanged unless a listed failed day cannot be fixed otherwise. "
-                + String.join(" ", scopedClauses);
-        return " " + trimToMaxChars(scopedSummary, RETRY_SCOPED_DAY_CONTEXT_MAX_CHARS);
-    }
-
-    private String buildWholePlanStableFieldInstruction(PlanDraftResponse failedDraft, List<String> validationIssues) {
-        if (failedDraft == null || failedDraft.daysPlan() == null || failedDraft.daysPlan().isEmpty()) {
-            return "";
-        }
-        List<Integer> failedDays = extractRetryDayIndexes(validationIssues);
-        List<String> hotelLocks = new ArrayList<>();
-        List<String> mealLocks = new ArrayList<>();
-        for (DayPlan day : failedDraft.daysPlan()) {
-            if (day == null) {
-                continue;
-            }
-            if (day.hotel() != null && day.hotel().name() != null && !day.hotel().name().isBlank()) {
-                hotelLocks.add("D" + day.dayIndex() + "=" + day.hotel().name().trim());
-            }
-            if (failedDays.contains(day.dayIndex())) {
-                continue;
-            }
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            for (Place stop : stops) {
-                if (!isStrictMealStop(stop)) {
-                    continue;
-                }
-                String mealType = normalizeSlot(stop.mealType());
-                if (!"lunch".equals(mealType) && !"dinner".equals(mealType)) {
-                    continue;
-                }
-                if (!hasVerifiedMealStop(stop, mealType)) {
-                    continue;
-                }
-                String name = safeStopName(stop);
-                mealLocks.add("D" + day.dayIndex() + " " + mealType + "=" + name);
-            }
-        }
-        String hotelClause = hotelLocks.isEmpty()
-                ? ""
-                : " Preserve these hotels exactly unless a listed validation issue directly requires a hotel change: "
-                + trimToMaxChars(String.join("; ", hotelLocks), RETRY_STABLE_FIELDS_MAX_CHARS / 2) + ".";
-        String mealClause = mealLocks.isEmpty()
-                ? ""
-                : " Preserve these already-verified meal venues on unaffected days: "
-                + trimToMaxChars(String.join("; ", mealLocks), RETRY_STABLE_FIELDS_MAX_CHARS / 2) + ".";
-        if (hotelClause.isBlank() && mealClause.isBlank()) {
-            return "";
-        }
-        return hotelClause + mealClause;
+        return planRetryInstructionService.extractDayIndex(issue);
     }
 
     private String buildDayDuplicateRetryInstruction(int dayIndex, PlanDraftResponse failedDraft) {
@@ -2331,197 +1515,6 @@ public class PlanProcessorService {
             return "";
         }
         return " Specifically replace these duplicates on day " + dayIndex + ": " + String.join("; ", duplicates) + ".";
-    }
-
-    private boolean hasAnyIssue(List<String> issues, String suffix) {
-        if (issues == null || issues.isEmpty() || suffix == null || suffix.isBlank()) {
-            return false;
-        }
-        return issues.stream().anyMatch(issue -> issue != null && issue.endsWith(suffix));
-    }
-
-    private String buildRetryDayContext(
-            PlanDraftResponse draft,
-            int dayIndex,
-            DaySkeletonContext skeletonContext
-    ) {
-        DayPlan day = findDayPlan(draft, dayIndex);
-        if (day == null) {
-            return "";
-        }
-        List<Place> stops = day.stops() == null ? List.of() : day.stops();
-        String stopOrder = stops.isEmpty()
-                ? "stops=none"
-                : "stops=" + stops.stream()
-                .map(this::summarizeRetryStop)
-                .collect(Collectors.joining(" -> "));
-        boolean hasLunch = stops.stream().anyMatch(stop -> hasMealSlot(stop, "lunch"));
-        boolean hasDinner = stops.stream().anyMatch(stop -> hasMealSlot(stop, "dinner"));
-        String mealStatus = "meals[lunch=" + (hasLunch ? "present" : "missing")
-                + ",dinner=" + (hasDinner ? "present" : "missing") + "]";
-        String skeleton = skeletonContext == null ? "" : skeletonContext.promptHintForDay(dayIndex);
-        String skeletonRange = extractEffectiveRangeFromSkeletonHint(skeleton);
-        String nonMealStatus = "nonMeal=count " + countNonMealStops(stops)
-                + (skeletonRange.isBlank() ? "" : ", target " + skeletonRange);
-        return stopOrder + "; " + mealStatus + "; " + nonMealStatus;
-    }
-
-    private String buildRetryPreservationInstruction(
-            PlanDraftResponse draft,
-            int dayIndex,
-            List<String> dayIssues
-    ) {
-        DayPlan day = findDayPlan(draft, dayIndex);
-        if (day == null || day.stops() == null || day.stops().isEmpty()) {
-            return " Preserve unchanged stops when possible.";
-        }
-        List<Place> stops = day.stops();
-        RetryAdjustmentBuckets buckets = collectRetryAdjustmentBuckets(dayIssues, stops);
-        List<String> mustKeep = new ArrayList<>();
-        List<String> mayRetime = new ArrayList<>();
-        List<String> mayReplace = new ArrayList<>();
-        List<String> mayInsertAround = new ArrayList<>();
-        for (int i = 0; i < stops.size(); i++) {
-            Place stop = stops.get(i);
-            String summary = summarizeRetryStop(stop);
-            boolean retime = buckets.mayRetime().contains(i);
-            boolean replace = buckets.mayReplace().contains(i);
-            boolean insertAround = buckets.mayInsertAround().contains(i);
-            if (!retime && !replace && !insertAround) {
-                mustKeep.add(summary);
-                continue;
-            }
-            if (retime) {
-                mayRetime.add(summary);
-            }
-            if (replace) {
-                mayReplace.add(summary);
-            }
-            if (insertAround) {
-                mayInsertAround.add(summary);
-            }
-        }
-        String mustKeepClause = mustKeep.isEmpty()
-                ? "mustKeep=none"
-                : "mustKeep=" + String.join(" | ", mustKeep);
-        String mayRetimeClause = mayRetime.isEmpty()
-                ? "mayRetime=none"
-                : "mayRetime=" + String.join(" | ", mayRetime);
-        String mayReplaceClause = mayReplace.isEmpty()
-                ? "mayReplace=none"
-                : "mayReplace=" + String.join(" | ", mayReplace);
-        String mayInsertAroundClause = mayInsertAround.isEmpty()
-                ? "mayInsertAround=none"
-                : "mayInsertAround=" + String.join(" | ", mayInsertAround);
-        return " Preserve unchanged stops when possible. Keep the must-keep stops stable unless they block a valid repair. "
-                + "Stop preservation: " + mustKeepClause + "; "
-                + mayRetimeClause + "; "
-                + mayReplaceClause + "; "
-                + mayInsertAroundClause + ".";
-    }
-
-    private RetryAdjustmentBuckets collectRetryAdjustmentBuckets(List<String> dayIssues, List<Place> stops) {
-        java.util.Set<Integer> mayRetime = new java.util.LinkedHashSet<>();
-        java.util.Set<Integer> mayReplace = new java.util.LinkedHashSet<>();
-        java.util.Set<Integer> mayInsertAround = new java.util.LinkedHashSet<>();
-        if (dayIssues == null || dayIssues.isEmpty()) {
-            return new RetryAdjustmentBuckets(mayRetime, mayReplace, mayInsertAround);
-        }
-        for (String issue : dayIssues) {
-            Matcher matcher = STOP_ISSUE_PATTERN.matcher(issue == null ? "" : issue);
-            if (matcher.matches()) {
-                int stopIndex = Integer.parseInt(matcher.group(2)) - 1;
-                if (stopIndex >= 0 && stopIndex < stops.size()) {
-                    if (issue.endsWith("-gap-too-large")
-                            || issue.endsWith("-time-sensitive-too-early")
-                            || issue.endsWith("-time-sensitive-too-late")
-                            || issue.endsWith("-time-sensitive-slot-mismatch")) {
-                        mayRetime.add(stopIndex);
-                    } else if (issue.endsWith("-duplicate-poi-across-days")) {
-                        mayReplace.add(stopIndex);
-                    } else {
-                        mayReplace.add(stopIndex);
-                    }
-                }
-                continue;
-            }
-            if (issue.endsWith("-missing-lunch")) {
-                addMealStopIndexes(mayInsertAround, stops, "lunch");
-            }
-            if (issue.endsWith("-missing-dinner")) {
-                addMealStopIndexes(mayInsertAround, stops, "dinner");
-            }
-            if (issue.endsWith("-too-few-non-meal-stops")) {
-                for (int i = 0; i < stops.size(); i++) {
-                    if (isCountedNonMealStop(stops.get(i))) {
-                        mayReplace.add(i);
-                    }
-                }
-                mayInsertAround.addAll(mayReplace);
-            }
-            if (issue.endsWith("-theme-park-cross-city")) {
-                for (int i = 0; i < stops.size(); i++) {
-                    if (!isStrictMealStop(stops.get(i))) {
-                        mayReplace.add(i);
-                    }
-                }
-            }
-        }
-        return new RetryAdjustmentBuckets(mayRetime, mayReplace, mayInsertAround);
-    }
-
-    private void addMealStopIndexes(java.util.Set<Integer> indexes, List<Place> stops, String slot) {
-        for (int i = 0; i < stops.size(); i++) {
-            if (hasMealSlot(stops.get(i), slot)) {
-                indexes.add(i);
-            }
-        }
-    }
-
-    private record RetryAdjustmentBuckets(
-            java.util.Set<Integer> mayRetime,
-            java.util.Set<Integer> mayReplace,
-            java.util.Set<Integer> mayInsertAround
-    ) {}
-
-    private DayPlan findDayPlan(PlanDraftResponse draft, int dayIndex) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return null;
-        }
-        return draft.daysPlan().stream()
-                .filter(day -> day != null && day.dayIndex() == dayIndex)
-                .findFirst()
-                .orElse(null);
-    }
-
-    private String summarizeRetryStop(Place stop) {
-        if (stop == null) {
-            return "unknown";
-        }
-        String name = stop.name() == null || stop.name().isBlank() ? "unnamed" : stop.name().trim();
-        String slot = stop.timeSlot() == null || stop.timeSlot().isBlank() ? "unslotted" : stop.timeSlot().trim();
-        String time = joinNonBlank("-", stop.startTime(), stop.endTime());
-        return name + "[" + slot + (time.isBlank() ? "" : "," + time) + "]";
-    }
-
-    private String extractEffectiveRangeFromSkeletonHint(String skeletonHint) {
-        if (skeletonHint == null || skeletonHint.isBlank()) {
-            return "";
-        }
-        String marker = "effectiveNonMeal=";
-        int start = skeletonHint.indexOf(marker);
-        if (start < 0) {
-            return "";
-        }
-        int from = start + marker.length();
-        int end = skeletonHint.indexOf(',', from);
-        if (end < 0) {
-            end = skeletonHint.indexOf('}', from);
-        }
-        if (end < 0 || end <= from) {
-            return "";
-        }
-        return skeletonHint.substring(from, end).trim();
     }
 
     private PlanDraftResponse relaxedPaceFallbackIfValid(
@@ -2717,49 +1710,6 @@ public class PlanProcessorService {
                 .trim();
     }
 
-    private List<String> validateThemeParkLocation(String requestedCity, int dayIndex, int stopIndex, Place stop) {
-        if (!isThemeParkLikeStop(stop)) {
-            return List.of();
-        }
-        StopCoordinate cityCenter = cityCenterCoordinate(requestedCity);
-        StopCoordinate stopCoordinate = coordinateOf(stop);
-        if (cityCenter == null || stopCoordinate == null) {
-            return List.of();
-        }
-        double distanceMeters = haversineMeters(cityCenter.lat(), cityCenter.lon(), stopCoordinate.lat(), stopCoordinate.lon());
-        if (distanceMeters > THEME_PARK_MAX_DAY_TRIP_DISTANCE_METERS) {
-            return List.of("day-" + dayIndex + "-stop-" + stopIndex + "-theme-park-cross-city");
-        }
-        return List.of();
-    }
-
-    private List<String> validateTimeSensitiveStop(int dayIndex, int stopIndex, Place stop, int startMinutes, int endMinutes) {
-        List<String> issues = new ArrayList<>();
-        String name = stop == null || stop.name() == null ? "" : stop.name().toLowerCase(Locale.ROOT);
-        String timeSlot = normalizeSlot(stop == null ? null : stop.timeSlot());
-
-        boolean museumLike = isCulturalOpeningHoursConstrained(stop);
-        if (museumLike && startMinutes >= 0 && startMinutes < 10 * 60) {
-            issues.add("day-" + dayIndex + "-stop-" + stopIndex + "-time-sensitive-too-early");
-        }
-        if (museumLike && endMinutes > CULTURAL_POI_LATEST_END_MINUTES) {
-            issues.add("day-" + dayIndex + "-stop-" + stopIndex + "-time-sensitive-too-late");
-        }
-
-        boolean penguinLike = name.contains("penguin");
-        if (penguinLike && startMinutes >= 0 && startMinutes < 16 * 60 + 30) {
-            issues.add("day-" + dayIndex + "-stop-" + stopIndex + "-time-sensitive-too-early");
-        }
-        if (penguinLike
-                && !timeSlot.isBlank()
-                && !"sunset".equals(timeSlot)
-                && !"evening".equals(timeSlot)
-                && !"night".equals(timeSlot)) {
-            issues.add("day-" + dayIndex + "-stop-" + stopIndex + "-time-sensitive-slot-mismatch");
-        }
-        return issues;
-    }
-
     private StopCoordinate cityCenterCoordinate(String city) {
         if (city == null || city.isBlank()) {
             return null;
@@ -2792,117 +1742,8 @@ public class PlanProcessorService {
     }
 
     public PlanDraftResponse pruneFlexibleFoodStops(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-
-        List<DayPlan> updatedDays = new ArrayList<>();
-        int minNonMealStops = minNonMealStopsPerDay(draft.pace());
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            if (stops.isEmpty()) {
-                updatedDays.add(day);
-                continue;
-            }
-
-            List<Place> workingStops = new ArrayList<>(stops);
-            boolean changed;
-            do {
-                changed = false;
-                for (int i = 0; i < workingStops.size(); i++) {
-                    Place stop = workingStops.get(i);
-                    if (isNonMealOccupyingMealSlot(stop)) {
-                        workingStops.set(i, clearMealSlotForNonMealStop(stop));
-                        changed = true;
-                        break;
-                    }
-                    if (isCompoundAttractionStop(stop)) {
-                        Place simplified = simplifyCompoundStop(stop);
-                        if (simplified != null) {
-                            workingStops.set(i, simplified);
-                        } else {
-                            if (wouldDropBelowMinNonMealStops(workingStops, stop, minNonMealStops)) {
-                                continue;
-                            }
-                            workingStops.remove(i);
-                        }
-                        changed = true;
-                        break;
-                    }
-                    if (isSoftActivityStop(stop)) {
-                        if (wouldDropBelowMinNonMealStops(workingStops, stop, minNonMealStops)) {
-                            continue;
-                        }
-                        if (i > 0) {
-                            Place previous = workingStops.get(i - 1);
-                            workingStops.set(i - 1, mergeSoftActivityIntoPrevious(previous, stop));
-                        }
-                        workingStops.remove(i);
-                        changed = true;
-                        break;
-                    }
-                    if (shouldCreateCulturalClosingProblem(stop)) {
-                        int removableIndex = removableFlexibleIndexBefore(workingStops, i);
-                        if (removableIndex >= 0) {
-                            Place removable = workingStops.get(removableIndex);
-                            if (wouldDropBelowMinNonMealStops(workingStops, removable, minNonMealStops)) {
-                                continue;
-                            }
-                            workingStops.remove(removableIndex);
-                            changed = true;
-                            break;
-                        }
-                    }
-                    if (!isFlexibleStop(stop)) {
-                        continue;
-                    }
-                    if (wouldDropBelowMinNonMealStops(workingStops, stop, minNonMealStops)) {
-                        continue;
-                    }
-                    if (shouldDropFlexibleStop(workingStops, i)) {
-                        workingStops.remove(i);
-                        changed = true;
-                        break;
-                    }
-                }
-                if (changed) {
-                    workingStops = new ArrayList<>(normalizeDaySchedule(new DayPlan(
-                            day.dayIndex(),
-                            day.hotel(),
-                            workingStops,
-                            day.theme(),
-                            day.morningNote(),
-                            day.afternoonNote(),
-                            day.eveningNote(),
-                            day.note()
-                    )).stops());
-                }
-            } while (changed);
-
-            updatedDays.add(new DayPlan(
-                    day.dayIndex(),
-                    day.hotel(),
-                    workingStops,
-                    day.theme(),
-                    day.morningNote(),
-                    day.afternoonNote(),
-                    day.eveningNote(),
-                    day.note()
-            ));
-        }
-
-        return planResponseAssembler.withDays(draft, updatedDays);
-    }
-
-    private boolean isNonMealOccupyingMealSlot(Place stop) {
-        if (stop == null) {
-            return false;
-        }
-        String timeSlot = normalizeSlot(stop.timeSlot());
-        if (!"lunch".equals(timeSlot) && !"dinner".equals(timeSlot)) {
-            return false;
-        }
-        return !isMealCategory(normalizeSlot(stop.category()));
+        PlanDraft pruned = planQualityService.pruneFlexibleFoodStops(PlanDraft.fromResponse(draft));
+        return pruned == null ? null : pruned.toResponse();
     }
 
     private boolean isMealCategory(String category) {
@@ -2912,198 +1753,6 @@ public class PlanProcessorService {
                 || "dining".equals(category)
                 || "bar".equals(category)
                 || "bakery".equals(category);
-    }
-
-    private Place clearMealSlotForNonMealStop(Place stop) {
-        String fallbackSlot = "dinner".equals(normalizeSlot(stop.timeSlot())) ? "evening" : "afternoon";
-        return new Place(
-                stop.name(),
-                stop.addressLine(),
-                stop.suburb(),
-                stop.city(),
-                stop.state(),
-                stop.postcode(),
-                stop.country(),
-                stop.category(),
-                stop.stayMinutes(),
-                fallbackSlot,
-                stop.startTime(),
-                stop.endTime(),
-                null,
-                stop.preferredArea(),
-                stop.cuisine(),
-                stop.vibe(),
-                stop.budgetLevel(),
-                stop.reason(),
-                stop.tip(),
-                stop.websiteUri(),
-                stop.googleMapsUri(),
-                stop.businessStatus(),
-                stop.url(),
-                stop.latitude(),
-                stop.longitude()
-        );
-    }
-
-    private boolean isCompoundAttractionStop(Place stop) {
-        if (stop == null || isStrictMealStop(stop) || "hotel".equals(normalizeSlot(stop.category()))) {
-            return false;
-        }
-        String name = stop.name() == null ? "" : stop.name().trim();
-        if (!name.matches("(?i).+\\s(&|and|\\+|/|\\|)\\s.+")) {
-            return false;
-        }
-        String category = normalizeSlot(stop.category());
-        if (!("attraction".equals(category) || "park".equals(category) || "nature".equals(category) || "museum".equals(category))) {
-            return false;
-        }
-        String lower = name.toLowerCase();
-        return lower.contains("lookout")
-                || lower.contains("planetarium")
-                || lower.contains("garden")
-                || lower.contains("museum")
-                || lower.contains("gallery")
-                || lower.contains("park")
-                || lower.contains("market")
-                || lower.contains("beach")
-                || lower.contains("zoo");
-    }
-
-    private Place simplifyCompoundStop(Place stop) {
-        if (stop == null) {
-            return null;
-        }
-        String name = stop.name() == null ? "" : stop.name().trim();
-        if (name.isBlank()) {
-            return null;
-        }
-        String[] parts = name.split("(?i)\\s+(?:&|and|\\+|/|\\|)\\s+", 2);
-        if (parts.length < 2) {
-            return null;
-        }
-        String first = parts[0].trim();
-        String second = parts[1].trim();
-        String chosen = chooseCompoundStopName(first, second);
-        if (chosen == null || chosen.isBlank()) {
-            return null;
-        }
-        String tip = stop.tip() == null || stop.tip().isBlank()
-                ? "Use this as a single navigable stop rather than combining multiple nearby attractions."
-                : stop.tip().trim() + " Keep this as a single navigable stop rather than combining multiple nearby attractions.";
-        return new Place(
-                chosen,
-                stop.addressLine(),
-                stop.suburb(),
-                stop.city(),
-                stop.state(),
-                stop.postcode(),
-                stop.country(),
-                stop.category(),
-                stop.stayMinutes(),
-                stop.timeSlot(),
-                stop.startTime(),
-                stop.endTime(),
-                stop.mealType(),
-                stop.preferredArea(),
-                stop.cuisine(),
-                stop.vibe(),
-                stop.budgetLevel(),
-                stop.reason(),
-                tip,
-                stop.websiteUri(),
-                stop.googleMapsUri(),
-                stop.businessStatus(),
-                stop.url(),
-                stop.latitude(),
-                stop.longitude()
-        );
-    }
-
-    private String chooseCompoundStopName(String first, String second) {
-        String firstLower = first == null ? "" : first.toLowerCase();
-        String secondLower = second == null ? "" : second.toLowerCase();
-        if (firstLower.contains("lookout")) {
-            return first;
-        }
-        if (secondLower.contains("lookout")) {
-            return second;
-        }
-        if (firstLower.contains("museum") || firstLower.contains("gallery") || firstLower.contains("planetarium")) {
-            return first;
-        }
-        if (secondLower.contains("museum") || secondLower.contains("gallery") || secondLower.contains("planetarium")) {
-            return second;
-        }
-        if (firstLower.contains("garden") || firstLower.contains("park")) {
-            return first;
-        }
-        if (secondLower.contains("garden") || secondLower.contains("park")) {
-            return second;
-        }
-        return first == null || first.isBlank() ? second : first;
-    }
-
-    private boolean isSoftActivityStop(Place stop) {
-        if (stop == null || isStrictMealStop(stop)) {
-            return false;
-        }
-        String category = normalizeSlot(stop.category());
-        if (!("attraction".equals(category) || "park".equals(category) || "nature".equals(category))) {
-            return false;
-        }
-        String name = stop.name() == null ? "" : stop.name().toLowerCase();
-        boolean activityName = name.contains("stroll")
-                || name.contains("rainforest walk")
-                || name.contains("arbour")
-                || name.contains("arbor")
-                || (name.contains("lookout") && name.contains("botanic"))
-                || name.contains("coastal walk")
-                || name.contains("sunset walk")
-                || name.contains("scenic walk")
-                || name.contains("riverwalk")
-                || name.contains(" walk ")
-                || name.contains("promenade")
-                || name.contains("walking path")
-                || name.contains("riverside walk");
-        if (!activityName) {
-            return false;
-        }
-        boolean hasVerifiedPlace = stop.googleMapsUri() != null && !stop.googleMapsUri().isBlank();
-        boolean hasCoordinates = stop.latitude() != null && stop.longitude() != null;
-        return !hasVerifiedPlace || !hasCoordinates;
-    }
-
-    private Place mergeSoftActivityIntoPrevious(Place previous, Place softActivity) {
-        String reason = (previous.reason() == null || previous.reason().isBlank())
-                ? softActivity.reason()
-                : previous.reason();
-        return new Place(
-                previous.name(),
-                previous.addressLine(),
-                previous.suburb(),
-                previous.city(),
-                previous.state(),
-                previous.postcode(),
-                previous.country(),
-                previous.category(),
-                previous.stayMinutes(),
-                previous.timeSlot(),
-                previous.startTime(),
-                previous.endTime(),
-                previous.mealType(),
-                previous.preferredArea(),
-                previous.cuisine(),
-                previous.vibe(),
-                previous.budgetLevel(),
-                reason,
-                previous.tip(),
-                previous.websiteUri(),
-                previous.googleMapsUri(),
-                previous.businessStatus(),
-                previous.url(),
-                previous.latitude(),
-                previous.longitude()
-        );
     }
 
     private boolean shouldCreateCulturalClosingProblem(Place stop) {
@@ -3137,133 +1786,9 @@ public class PlanProcessorService {
         return "park".equals(category) || "nature".equals(category) || "shop".equals(category) || "market".equals(category);
     }
 
-    private boolean shouldDropFlexibleStop(List<Place> stops, int index) {
-        Place stop = stops.get(index);
-        if (isParkLikeStop(stop)) {
-            return shouldDropParkLikeStop(stops, index);
-        }
-        if (isNonStrictFoodStop(stop)) {
-            return shouldDropFlexibleFoodStop(stops, index);
-        }
-        return false;
-    }
-
-    private boolean isParkLikeStop(Place stop) {
-        if (stop == null) return false;
-        String category = normalizeSlot(stop.category());
-        return "park".equals(category) || "nature".equals(category);
-    }
-
-    private boolean shouldDropParkLikeStop(List<Place> stops, int index) {
-        Place stop = stops.get(index);
-        if (stop.googleMapsUri() != null && !stop.googleMapsUri().isBlank()) {
-            return false;
-        }
-        if (index > 0 && isParkLikeStop(stops.get(index - 1))) {
-            return true;
-        }
-        if (index < stops.size() - 1 && isParkLikeStop(stops.get(index + 1))) {
-            return true;
-        }
-        return false;
-    }
-
-    private boolean isNonStrictFoodStop(Place stop) {
-        if (stop == null || isStrictMealStop(stop)) {
-            return false;
-        }
-        String category = normalizeSlot(stop.category());
-        return "cafe".equals(category) || "bakery".equals(category) || "bar".equals(category) || "food".equals(category);
-    }
-
-    private boolean shouldDropFlexibleFoodStop(List<Place> stops, int index) {
-        Place stop = stops.get(index);
-        if (stop.googleMapsUri() != null && !stop.googleMapsUri().isBlank()) {
-            return false;
-        }
-        String timeSlot = normalizeSlot(stop.timeSlot());
-        if ("lunch".equals(timeSlot) || "dinner".equals(timeSlot)) {
-            return false;
-        }
-        int mealCount = 0;
-        for (Place s : stops) {
-            if (isStrictMealStop(s)) mealCount++;
-        }
-        return mealCount >= 2;
-    }
     public PlanDraftResponse pruneUnselectedShoppingStops(PlanDraftResponse draft, CreatePlanReq req) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty() || isMarketShoppingSelected(req)) {
-            return draft;
-        }
-
-        List<DayPlan> updatedDays = new ArrayList<>();
-        boolean changed = false;
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            List<Place> keptStops = new ArrayList<>();
-            for (Place stop : stops) {
-                if (shouldDropUnselectedShoppingStop(stop)) {
-                    changed = true;
-                    continue;
-                }
-                keptStops.add(stop);
-            }
-            updatedDays.add(new DayPlan(
-                    day.dayIndex(),
-                    day.hotel(),
-                    keptStops,
-                    day.theme(),
-                    day.morningNote(),
-                    day.afternoonNote(),
-                    day.eveningNote(),
-                    day.note()
-            ));
-        }
-
-        if (!changed) {
-            return draft;
-        }
-
-        return planResponseAssembler.withDays(draft, updatedDays);
-    }
-
-    private boolean shouldDropUnselectedShoppingStop(Place stop) {
-        if (stop == null || isStrictMealStop(stop) || "hotel".equals(normalizeSlot(stop.category()))) {
-            return false;
-        }
-        String category = normalizeSlot(stop.category());
-        if ("shop".equals(category) || "shopping".equals(category) || "market".equals(category)) {
-            return true;
-        }
-        String primaryText = String.join(" ",
-                nullToEmpty(stop.name()),
-                nullToEmpty(stop.addressLine()),
-                category
-        ).toLowerCase();
-        return primaryText.contains("shopping")
-                || primaryText.contains("retail")
-                || primaryText.contains(" mall")
-                || primaryText.contains("arcade")
-                || primaryText.contains("outlet")
-                || primaryText.contains("marketplace")
-                || primaryText.contains("shopping centre")
-                || primaryText.contains("shopping center");
-    }
-
-    private boolean isMarketShoppingSelected(CreatePlanReq req) {
-        if (req == null || req.style() == null) {
-            return false;
-        }
-        return req.style().stream()
-                .map(this::normalizeSlot)
-                .anyMatch("market_shopping"::equals);
-    }
-
-    private boolean isSelectedMarketShoppingAnchor(Place stop, CreatePlanReq req) {
-        if (!isMarketShoppingSelected(req) || stop == null || isStrictMealStop(stop) || "hotel".equals(normalizeSlot(stop.category()))) {
-            return false;
-        }
-        return isMarketShoppingLikeStop(stop);
+        PlanDraft pruned = planQualityService.pruneUnselectedShoppingStops(PlanDraft.fromResponse(draft), req);
+        return pruned == null ? null : pruned.toResponse();
     }
 
     private boolean isMarketShoppingLikeStop(Place stop) {
@@ -3292,255 +1817,7 @@ public class PlanProcessorService {
     }
 
     private PlanDraftResponse verifyThemeParkStopsWithPlaces(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-        if (!googlePlacesClient.isEnabled()) {
-            return draft;
-        }
-
-        boolean changed = false;
-        int themeParkStopCount = 0;
-        int replacedCount = 0;
-        List<DayPlan> updatedDays = new ArrayList<>();
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            List<Place> updatedStops = new ArrayList<>();
-            for (Place stop : stops) {
-                if (!isThemeParkLikeStop(stop)) {
-                    updatedStops.add(stop);
-                    continue;
-                }
-                themeParkStopCount++;
-                GooglePlacesClient.PlaceCandidate candidate = resolveThemeParkWithPlaces(stop);
-                if (candidate == null) {
-                    updatedStops.add(stop);
-                    continue;
-                }
-                updatedStops.add(copyThemeParkWithCandidate(stop, candidate));
-                replacedCount++;
-                changed = true;
-            }
-            updatedDays.add(new DayPlan(day.dayIndex(), day.hotel(), updatedStops, day.theme(), day.morningNote(), day.afternoonNote(), day.eveningNote(), day.note()));
-        }
-        if (themeParkStopCount > 0) {
-            log.info("Theme park Places verification completed: city={} stops={} replaced={}", draft.city(), themeParkStopCount, replacedCount);
-        }
-        if (!changed) {
-            return draft;
-        }
-        return planResponseAssembler.withDays(draft, updatedDays);
-    }
-
-    private GooglePlacesClient.PlaceCandidate resolveThemeParkWithPlaces(Place stop) {
-        if (stop == null || stop.name() == null || stop.name().isBlank() || !googlePlacesClient.isEnabled()) {
-            return null;
-        }
-        for (String query : themeParkPlaceSearchQueries(stop)) {
-            GooglePlacesClient.PlaceCandidate candidate = googlePlacesClient.searchText(query, stop.city()).stream()
-                    .filter(place -> Double.isFinite(place.lat()) && Double.isFinite(place.lng()))
-                    .filter(place -> placeHeuristicService.isCoordinatePlausibleForCity(new StopCoordinate(place.lat(), place.lng()), stop.city()))
-                    .map(place -> new RankedPlaceCoordinate(place, scoreThemeParkCandidate(stop, place)))
-                    .filter(ranked -> isAcceptableThemeParkCandidate(ranked))
-                    .sorted((a, b) -> Integer.compare(b.score(), a.score()))
-                    .map(RankedPlaceCoordinate::candidate)
-                    .findFirst()
-                    .orElse(null);
-            if (candidate != null) {
-                return candidate;
-            }
-        }
-        for (String query : genericThemeParkPlaceSearchQueries(stop)) {
-            GooglePlacesClient.PlaceCandidate candidate = googlePlacesClient.searchText(query, stop.city()).stream()
-                    .filter(place -> Double.isFinite(place.lat()) && Double.isFinite(place.lng()))
-                    .filter(place -> placeHeuristicService.isCoordinatePlausibleForCity(new StopCoordinate(place.lat(), place.lng()), stop.city()))
-                    .map(place -> new RankedPlaceCoordinate(place, scoreGenericThemeParkCandidate(place)))
-                    .filter(this::isAcceptableGenericThemeParkCandidate)
-                    .sorted((a, b) -> Integer.compare(b.score(), a.score()))
-                    .map(RankedPlaceCoordinate::candidate)
-                    .findFirst()
-                    .orElse(null);
-            if (candidate != null) {
-                return candidate;
-            }
-        }
-        return null;
-    }
-
-    private boolean isAcceptableThemeParkCandidate(RankedPlaceCoordinate ranked) {
-        if (ranked == null || ranked.candidate() == null || ranked.score() < 140) {
-            return false;
-        }
-        if (!hasStrictThemeParkPlaceType(ranked.candidate())) {
-            return false;
-        }
-        String status = ranked.candidate().businessStatus() == null ? "" : ranked.candidate().businessStatus().toUpperCase(Locale.ROOT);
-        return !status.contains("CLOSED");
-    }
-
-    private boolean isAcceptableGenericThemeParkCandidate(RankedPlaceCoordinate ranked) {
-        if (ranked == null || ranked.candidate() == null || ranked.score() < 180) {
-            return false;
-        }
-        if (!hasStrictThemeParkPlaceType(ranked.candidate())) {
-            return false;
-        }
-        String status = ranked.candidate().businessStatus() == null ? "" : ranked.candidate().businessStatus().toUpperCase(Locale.ROOT);
-        return !status.contains("CLOSED");
-    }
-
-    private boolean hasStrictThemeParkPlaceType(GooglePlacesClient.PlaceCandidate candidate) {
-        if (candidate == null || candidate.types() == null) {
-            return false;
-        }
-        String types = String.join(" ", candidate.types()).toLowerCase(Locale.ROOT);
-        return types.contains("amusement_park")
-                || types.contains("theme_park")
-                || types.contains("water_park");
-    }
-
-    private int scoreThemeParkCandidate(Place stop, GooglePlacesClient.PlaceCandidate candidate) {
-        String expectedName = placeHeuristicService.normalizeSearchText(stop.name());
-        String expectedAddress = placeHeuristicService.normalizeSearchText(stop.addressLine());
-        String candidateName = placeHeuristicService.normalizeSearchText(candidate.name());
-        String candidateText = placeHeuristicService.normalizeSearchText(candidate.name() + " " + candidate.formattedAddress() + " " + String.join(" ", candidate.types()));
-        String types = String.join(" ", candidate.types()).toLowerCase(Locale.ROOT);
-        int score = placeHeuristicService.commonSignificantTokenCount(expectedName, candidateText) * 80;
-        score += placeHeuristicService.commonSignificantTokenCount(expectedAddress, candidateText) * 20;
-        if (!expectedName.isBlank() && !candidateName.isBlank() && (candidateName.contains(expectedName) || expectedName.contains(candidateName))) {
-            score += 120;
-        }
-        if (types.contains("amusement_park") || types.contains("theme_park") || types.contains("water_park")) {
-            score += 160;
-        }
-        if (types.contains("tourist_attraction")) {
-            score += 60;
-        }
-        if (types.contains("point_of_interest") || types.contains("establishment")) {
-            score += 20;
-        }
-        if (types.contains("restaurant") || types.contains("lodging") || types.contains("shopping_mall")) {
-            score -= 120;
-        }
-        return score;
-    }
-
-    private int scoreGenericThemeParkCandidate(GooglePlacesClient.PlaceCandidate candidate) {
-        String candidateText = placeHeuristicService.normalizeSearchText(candidate.name() + " " + candidate.formattedAddress() + " " + String.join(" ", candidate.types()));
-        String types = String.join(" ", candidate.types()).toLowerCase(Locale.ROOT);
-        int score = 0;
-        if (types.contains("amusement_park") || types.contains("theme_park") || types.contains("water_park")) {
-            score += 220;
-        }
-        if (types.contains("tourist_attraction")) {
-            score += 50;
-        }
-        if (candidateText.contains("theme park")
-                || candidateText.contains("amusement park")
-                || candidateText.contains("water park")
-                || candidateText.contains("luna park")
-                || candidateText.contains("raging waters")) {
-            score += 80;
-        }
-        if (types.contains("restaurant") || types.contains("lodging") || types.contains("shopping_mall")) {
-            score -= 160;
-        }
-        return score;
-    }
-
-    private Place copyThemeParkWithCandidate(Place stop, GooglePlacesClient.PlaceCandidate candidate) {
-        String addressLine = candidate.formattedAddress() == null || candidate.formattedAddress().isBlank()
-                ? stop.addressLine()
-                : candidate.formattedAddress();
-        String name = candidate.name() == null || candidate.name().isBlank()
-                ? stop.name()
-                : candidate.name();
-        String url = candidate.googleMapsUri() == null || candidate.googleMapsUri().isBlank()
-                ? stop.url()
-                : candidate.googleMapsUri();
-        ParsedAddress parsedAddress = parseAustralianAddress(candidate.formattedAddress(), stop);
-        String suburb = parsedAddress.suburb().isBlank() ? stop.suburb() : parsedAddress.suburb();
-        String state = parsedAddress.state().isBlank() ? stop.state() : parsedAddress.state();
-        String postcode = parsedAddress.postcode().isBlank() ? stop.postcode() : parsedAddress.postcode();
-        String country = parsedAddress.country().isBlank() ? stop.country() : parsedAddress.country();
-        String themeParkAddressLine = parsedAddress.addressLine().isBlank() ? addressLine : parsedAddress.addressLine();
-        String preferredArea = suburb == null || suburb.isBlank() ? stop.preferredArea() : suburb;
-        return new Place(
-                name,
-                themeParkAddressLine,
-                suburb,
-                stop.city(),
-                state,
-                postcode,
-                country,
-                "theme_park",
-                stop.stayMinutes(),
-                stop.timeSlot(),
-                stop.startTime(),
-                stop.endTime(),
-                stop.mealType(),
-                preferredArea,
-                stop.cuisine(),
-                stop.vibe(),
-                stop.budgetLevel(),
-                sanitizeThemeParkReason(stop),
-                sanitizeThemeParkTip(),
-                candidate.websiteUri(),
-                candidate.googleMapsUri(),
-                candidate.businessStatus(),
-                url,
-                Double.isNaN(candidate.lat()) ? stop.latitude() : candidate.lat(),
-                Double.isNaN(candidate.lng()) ? stop.longitude() : candidate.lng()
-        );
-    }
-
-    private List<String> themeParkPlaceSearchQueries(Place stop) {
-        List<String> queries = new ArrayList<>();
-        if (stop == null) {
-            return queries;
-        }
-        String name = stop.name() == null ? "" : stop.name().trim();
-        String coreName = themeParkCorePoiName(name);
-        String address = stop.addressLine() == null ? "" : stop.addressLine().trim();
-        String suburb = stop.suburb() == null ? "" : stop.suburb().trim();
-        String city = stop.city() == null ? "" : stop.city().trim();
-        if (!coreName.isBlank() && !address.isBlank()) {
-            addUnique(queries, coreName + ", " + address);
-        }
-        if (!name.isBlank() && !address.isBlank() && !name.equalsIgnoreCase(coreName)) {
-            addUnique(queries, name + ", " + address);
-        }
-        if (!coreName.isBlank() && !suburb.isBlank()) {
-            addUnique(queries, coreName + ", " + suburb);
-        }
-        if (!name.isBlank() && !suburb.isBlank()) {
-            addUnique(queries, name + ", " + suburb);
-        }
-        if (!coreName.isBlank() && !city.isBlank()) {
-            addUnique(queries, coreName + ", " + city);
-        }
-        if (!name.isBlank() && !city.isBlank()) {
-            addUnique(queries, name + ", " + city);
-        }
-        if (!coreName.isBlank()) {
-            addUnique(queries, coreName);
-        }
-        if (!name.isBlank()) {
-            addUnique(queries, name);
-        }
-        return queries;
-    }
-
-    private List<String> genericThemeParkPlaceSearchQueries(Place stop) {
-        List<String> queries = new ArrayList<>();
-        String city = stop == null || stop.city() == null ? "" : stop.city().trim();
-        if (!city.isBlank()) {
-            addUnique(queries, "theme park");
-            addUnique(queries, "amusement park");
-            addUnique(queries, "water park");
-            addUnique(queries, "family amusement park");
-        }
-        return queries;
+        return themeParkGovernanceService.verifyStopsWithPlaces(draft);
     }
 
     private ParsedAddress parseAustralianAddress(String formattedAddress, Place fallback) {
@@ -3613,348 +1890,27 @@ public class PlanProcessorService {
     }
 
     private String sanitizeThemeParkCopy(String value) {
-        if (value == null || value.isBlank()) {
-            return value;
-        }
-        String sanitized = value
-                .replaceAll("(?i)\\bshuttles\\b", "transport options")
-                .replaceAll("(?i)\\bshuttle\\b", "transport")
-                .replaceAll("(?i)\\btimed entry\\b", "entry requirements")
-                .replaceAll("(?i)\\btimed access\\b", "entry requirements")
-                .replaceAll("(?i)\\bride access\\b", "attraction access")
-                .replaceAll("(?i)\\bride schedules\\b", "current operating details")
-                .replaceAll("(?i)\\bride schedule\\b", "current operating details")
-                .replaceAll("(?i)\\bshow schedules\\b", "current operating details")
-                .replaceAll("(?i)\\bshow schedule\\b", "current operating details")
-                .replaceAll("(?i)\\bshows\\b", "activities")
-                .replaceAll("(?i)\\bshow\\b", "activity")
-                .trim();
-        String sentenceSafe = removeRiskyNarrativeSentences(sanitized);
-        return sentenceSafe == null || sentenceSafe.isBlank() ? sanitized : sentenceSafe;
-    }
-
-    private String removeRiskyNarrativeSentences(String value) {
-        if (value == null || value.isBlank()) {
-            return value;
-        }
-        StringBuilder kept = new StringBuilder();
-        for (String sentence : value.split("(?<=[.!?])\\s+|;\\s*")) {
-            String trimmed = sentence.trim();
-            if (trimmed.isBlank() || containsRiskyNarrativeClaim(trimmed)) {
-                continue;
-            }
-            if (!kept.isEmpty()) {
-                kept.append(' ');
-            }
-            kept.append(trimmed);
-        }
-        return kept.toString().trim();
-    }
-
-    private boolean containsRiskyNarrativeClaim(String value) {
-        String text = value == null ? "" : value.toLowerCase(Locale.ROOT);
-        return text.contains("priority access")
-                || text.contains("timed entry")
-                || text.contains("timed ticket")
-                || text.contains("timed tickets")
-                || text.contains("ferry terminal")
-                || text.contains("ferry from")
-                || text.contains("ferry to")
-                || text.contains("opening hours")
-                || text.contains("open daily")
-                || text.contains("open weekends")
-                || text.contains("weekend-only")
-                || text.contains("weekends only")
-                || text.contains("last entry")
-                || text.contains("opens at")
-                || text.contains("closes at")
-                || text.contains("open late")
-                || text.contains("adjusted to")
-                || text.contains("book ahead")
-                || text.contains("reserve ahead")
-                || text.contains("reserve in advance")
-                || text.contains("reserve dinner ahead")
-                || text.contains("guarantee seating")
-                || text.contains("accepts walk-ins")
-                || text.contains("accepts walk ins")
-                || text.contains("signature dish")
-                || text.contains("signature dishes")
-                || text.contains("must-try")
-                || text.contains("must try")
-                || text.contains("freshest")
-                || text.contains("best in")
-                || text.contains("best seating")
-                || text.contains("preferred seating")
-                || text.contains("window-side")
-                || text.contains("window side")
-                || text.contains("window seats")
-                || text.contains("outdoor seating")
-                || text.contains("balcony seating")
-                || text.contains("upper-level tables")
-                || text.contains("upper level tables")
-                || text.contains("guaranteed")
-                || text.contains("complimentary")
-                || text.contains("only verified")
-                || text.contains("operationally active")
-                || text.contains("verified, accessible")
-                || text.contains("elevated terraces")
-                || text.contains("classic attractions like")
-                || text.contains("small galleries")
-                || text.contains("leafy streets")
-                || text.contains("entrance plaza")
-                || text.contains("quiet bayside moments")
-                || text.contains("harbour lookouts")
-                || text.contains("harbor lookouts")
-                || text.contains("scenic views")
-                || text.contains("skyline views")
-                || text.contains("scenic dinner")
-                || text.contains("cash only")
-                || text.contains("card accepted")
-                || text.contains("cards accepted")
-                || text.contains("payment")
-                || text.matches(".*\\b\\d{1,2}:\\d{2}\\s*(am|pm)?\\b.*")
-                || text.matches(".*\\b\\d{1,2}\\s*(am|pm)\\b.*")
-                || text.matches(".*\\b\\d+\\s*[- ]?minute\\b.*")
-                || text.matches(".*\\b\\d+\\s*min\\b.*")
-                || text.contains(" bus ")
-                || text.contains(" taxi")
-                || text.contains(" train")
-                || text.contains(" ferry")
-                || text.contains(" tram")
-                || text.contains(" by bus")
-                || text.contains(" by taxi")
-                || text.contains(" by train")
-                || text.contains(" by ferry")
-                || text.contains(" by tram")
-                || text.contains("parking hassle")
-                || text.contains("shuttle")
-                || text.contains("ride access")
-                || text.contains("ride schedule")
-                || text.contains("ride schedules")
-                || text.contains("timed access")
-                || text.contains("show schedule")
-                || text.contains("show schedules")
-                || text.contains("wait time");
-    }
-
-    private String themeParkCorePoiName(String name) {
-        if (name == null) {
-            return "";
-        }
-        String cleaned = name.trim();
-        String[] parts = cleaned.split("\\s+(?:-|\\||:)\\s*");
-        return parts.length == 0 ? cleaned : parts[0].trim();
+        return themeParkGovernanceService.sanitizeCopy(value);
     }
 
     private PlanDraftResponse pruneOutOfRangeThemeParkStops(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-        StopCoordinate cityCenter = cityCenterCoordinate(draft.city());
-        if (cityCenter == null) {
-            return draft;
-        }
-
-        boolean changed = false;
-        List<DayPlan> updatedDays = new ArrayList<>();
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            List<Place> keptStops = new ArrayList<>();
-            for (Place stop : stops) {
-                if (isOutOfRangeThemeParkStop(cityCenter, stop)) {
-                    log.info("Pruned out-of-range theme park stop city={} day={} stop={}",
-                            draft.city(), day.dayIndex(), stop.name());
-                    changed = true;
-                    continue;
-                }
-                keptStops.add(stop);
-            }
-            updatedDays.add(new DayPlan(
-                    day.dayIndex(),
-                    day.hotel(),
-                    keptStops,
-                    day.theme(),
-                    day.morningNote(),
-                    day.afternoonNote(),
-                    day.eveningNote(),
-                    day.note()
-            ));
-        }
-        if (!changed) {
-            return draft;
-        }
-        return planResponseAssembler.withDays(draft, updatedDays);
-    }
-
-    private boolean isOutOfRangeThemeParkStop(StopCoordinate cityCenter, Place stop) {
-        if (!isThemeParkLikeStop(stop)) {
-            return false;
-        }
-        StopCoordinate stopCoordinate = coordinateOf(stop);
-        if (cityCenter == null || stopCoordinate == null) {
-            return false;
-        }
-        double distanceMeters = haversineMeters(cityCenter.lat(), cityCenter.lon(), stopCoordinate.lat(), stopCoordinate.lon());
-        return distanceMeters > THEME_PARK_MAX_DAY_TRIP_DISTANCE_METERS;
+        return themeParkGovernanceService.pruneOutOfRangeStops(draft);
     }
 
     private PlanDraftResponse pruneThemeParkDayTrips(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-        List<DayPlan> updatedDays = new ArrayList<>();
-        boolean changed = false;
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            Place themePark = stops.stream()
-                    .filter(this::isThemeParkLikeStop)
-                    .findFirst()
-                    .orElse(null);
-            if (themePark == null) {
-                updatedDays.add(day);
-                continue;
-            }
-
-            int keptSameClusterExtra = 0;
-            List<Place> keptStops = new ArrayList<>();
-            for (Place stop : stops) {
-                if (stop == themePark) {
-                    keptStops.add(stop);
-                    continue;
-                }
-                if (hasMealSlot(stop, "lunch")) {
-                    if (isThemeParkClusterMeal(themePark, stop)) {
-                        keptStops.add(stop);
-                        continue;
-                    }
-                    changed = true;
-                    continue;
-                }
-                if (isStrictMealStop(stop)) {
-                    keptStops.add(stop);
-                    continue;
-                }
-                if (stops.indexOf(stop) < stops.indexOf(themePark)) {
-                    changed = true;
-                    continue;
-                }
-                if (isSameThemeParkCluster(themePark, stop) && keptSameClusterExtra < 1) {
-                    keptStops.add(stop);
-                    keptSameClusterExtra++;
-                    continue;
-                }
-                changed = true;
-            }
-            updatedDays.add(new DayPlan(
-                    day.dayIndex(),
-                    day.hotel(),
-                    keptStops,
-                    day.theme(),
-                    day.morningNote(),
-                    day.afternoonNote(),
-                    day.eveningNote(),
-                    day.note()
-            ));
-        }
-        if (!changed) {
-            return draft;
-        }
-        return planResponseAssembler.withDays(draft, updatedDays);
+        return themeParkGovernanceService.pruneDayTrips(draft);
     }
 
     public PlanDraftResponse expandThemeParkDiningBreaks(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-        List<DayPlan> updatedDays = new ArrayList<>();
-        boolean changed = false;
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            Place themePark = stops.stream()
-                    .filter(this::isThemeParkLikeStop)
-                    .findFirst()
-                    .orElse(null);
-            if (themePark == null || !isThemeParkSplitEligible(draft.pace())) {
-                updatedDays.add(day);
-                continue;
-            }
-            int lunchIndex = firstMealIndex(stops, "lunch");
-            int themeParkIndex = stops.indexOf(themePark);
-            if (lunchIndex <= themeParkIndex || lunchIndex < 0 || hasThemeParkAfterIndex(stops, lunchIndex)) {
-                updatedDays.add(day);
-                continue;
-            }
-            List<Place> expandedStops = new ArrayList<>(stops);
-            expandedStops.set(themeParkIndex, morningThemeParkStop(themePark));
-            lunchIndex = firstMealIndex(expandedStops, "lunch");
-            expandedStops.set(lunchIndex, themeParkLunchStop(themePark));
-            expandedStops.add(lunchIndex + 1, themeParkContinuationStop(themePark));
-            changed = true;
-            updatedDays.add(new DayPlan(
-                    day.dayIndex(),
-                    day.hotel(),
-                    expandedStops,
-                    day.theme(),
-                    day.morningNote(),
-                    day.afternoonNote(),
-                    day.eveningNote(),
-                    day.note()
-            ));
-        }
-        if (!changed) {
-            return draft;
-        }
-        return planResponseAssembler.withDays(draft, updatedDays);
+        return themeParkGovernanceService.expandDiningBreaks(draft);
     }
 
     private boolean isThemeParkLikeStop(Place stop) {
-        if (stop == null) return false;
-        String cat = normalizeSlot(stop.category());
-        if ("theme_park".equals(cat)) return true;
-        String name = stop.name() == null ? "" : stop.name().toLowerCase();
-        return name.contains("disneyland") || name.contains("disney world") || name.contains("universal studios") || name.contains("theme park") || name.contains("water park");
-    }
-
-    private boolean isThemeParkClusterMeal(Place themePark, Place stop) {
-        if (themePark == null || stop == null || !hasMealSlot(stop, "lunch")) {
-            return false;
-        }
-        String stopName = nullToEmpty(stop.name()).toLowerCase(Locale.ROOT);
-        String themeParkName = nullToEmpty(themePark.name()).toLowerCase(Locale.ROOT);
-        if (!themeParkName.isBlank() && stopName.contains(themeParkName)) {
-            return true;
-        }
-        String stopMapsUri = nullToEmpty(stop.googleMapsUri());
-        String themeMapsUri = nullToEmpty(themePark.googleMapsUri());
-        if (!stopMapsUri.isBlank() && stopMapsUri.equals(themeMapsUri)) {
-            return true;
-        }
-        return isSameThemeParkCluster(themePark, stop);
+        return themeParkGovernanceService.isThemeParkLikeStop(stop);
     }
 
     private boolean isSameThemeParkCluster(Place themePark, Place stop) {
-        if (themePark == null || stop == null) {
-            return false;
-        }
-        if (themePark.latitude() != null && themePark.longitude() != null && stop.latitude() != null && stop.longitude() != null) {
-            double distanceMeters = haversineMeters(
-                    themePark.latitude(),
-                    themePark.longitude(),
-                    stop.latitude(),
-                    stop.longitude()
-            );
-            return distanceMeters <= 2000;
-        }
-        String tpArea = themeParkAnchorArea(themePark);
-        String stArea = themeParkAnchorArea(stop);
-        return tpArea != null && tpArea.equals(stArea);
-    }
-
-    private String themeParkAnchorArea(Place themePark) {
-        if (themePark == null) return null;
-        String area = normalizeSlot(themePark.preferredArea());
-        if (area.isEmpty()) area = normalizeSlot(themePark.suburb());
-        return area.isEmpty() ? null : area;
+        return themeParkGovernanceService.isSameThemeParkCluster(themePark, stop);
     }
 
     private double haversineMeters(double lat1, double lon1, double lat2, double lon2) {
@@ -3968,300 +1924,11 @@ public class PlanProcessorService {
         return R * c;
     }
 
-    private boolean isThemeParkSplitEligible(String pace) {
-        String p = normalizePaceLabel(pace);
-        return "relaxed".equals(p) || "normal".equals(p);
-    }
-
     private int firstMealIndex(List<Place> stops, String mealType) {
         for (int i = 0; i < stops.size(); i++) {
             if (hasMealSlot(stops.get(i), mealType)) return i;
         }
         return -1;
-    }
-
-    private boolean hasThemeParkAfterIndex(List<Place> stops, int index) {
-        for (int i = index + 1; i < stops.size(); i++) {
-            if (isThemeParkLikeStop(stops.get(i))) return true;
-        }
-        return false;
-    }
-
-    private Place morningThemeParkStop(Place themePark) {
-        return new Place(
-                themePark.name() + " (Morning)",
-                themePark.addressLine(),
-                themePark.suburb(),
-                themePark.city(),
-                themePark.state(),
-                themePark.postcode(),
-                themePark.country(),
-                themePark.category(),
-                180,
-                "morning",
-                themePark.startTime(),
-                "12:00",
-                null,
-                themePark.preferredArea(),
-                null,
-                null,
-                null,
-                themePark.reason(),
-                themePark.tip(),
-                themePark.websiteUri(),
-                themePark.googleMapsUri(),
-                themePark.businessStatus(),
-                themePark.url(),
-                themePark.latitude(),
-                themePark.longitude()
-        );
-    }
-
-    private Place themeParkLunchStop(Place themePark) {
-        String parkName = nullToEmpty(themePark.name()).isBlank() ? "Theme Park" : themePark.name();
-        return new Place(
-                parkName + " Internal Dining Break",
-                themePark.addressLine(),
-                themePark.suburb(),
-                themePark.city(),
-                themePark.state(),
-                themePark.postcode(),
-                themePark.country(),
-                "dining",
-                60,
-                "lunch",
-                "12:00",
-                "13:00",
-                "lunch",
-                themePark.preferredArea(),
-                "theme park dining",
-                "casual",
-                "midrange",
-                "This is a controlled in-park dining break, not a separate restaurant recommendation.",
-                "Choose an available in-park or immediately adjacent option on the day.",
-                null,
-                null,
-                null,
-                null,
-                themePark.latitude(),
-                themePark.longitude()
-        );
-    }
-
-    private Place themeParkContinuationStop(Place themePark) {
-        return new Place(
-                themePark.name() + " (Afternoon)",
-                themePark.addressLine(),
-                themePark.suburb(),
-                themePark.city(),
-                themePark.state(),
-                themePark.postcode(),
-                themePark.country(),
-                themePark.category(),
-                THEME_PARK_AFTERNOON_CONTINUATION_MINUTES,
-                "afternoon",
-                "13:00",
-                formatMinutes(13 * 60 + THEME_PARK_AFTERNOON_CONTINUATION_MINUTES),
-                null,
-                themePark.preferredArea(),
-                null,
-                null,
-                null,
-                "Continue exploring the park at a flexible pace.",
-                sanitizeThemeParkCopy(themePark.tip()),
-                themePark.websiteUri(),
-                themePark.googleMapsUri(),
-                themePark.businessStatus(),
-                themePark.url(),
-                themePark.latitude(),
-                themePark.longitude()
-        );
-    }
-
-    private PlanDraftResponse pruneAreaInconsistentFlexibleStops(PlanDraftResponse draft) {
-        return pruneAreaInconsistentFlexibleStops(draft, null);
-    }
-
-    private PlanDraftResponse pruneAreaInconsistentFlexibleStops(PlanDraftResponse draft, CreatePlanReq req) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-
-        List<DayPlan> updatedDays = new ArrayList<>();
-        boolean changed = false;
-        int minNonMealStops = minNonMealStopsPerDay(draft.pace());
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            List<Place> workingStops = new ArrayList<>(stops);
-            boolean dayChanged;
-            do {
-                dayChanged = false;
-                for (int i = 0; i < workingStops.size(); i++) {
-                    if (isSelectedMarketShoppingAnchor(workingStops.get(i), req)) {
-                        continue;
-                    }
-                    if (countNonMealStops(workingStops) <= minNonMealStops
-                            && isCountedNonMealStop(workingStops.get(i))
-                            && !isThemeParkLikeStop(workingStops.get(i))) {
-                        continue;
-                    }
-                    if (shouldDropAreaInconsistentFlexibleStop(workingStops, i)) {
-                        workingStops.remove(i);
-                        dayChanged = true;
-                        changed = true;
-                        break;
-                    }
-                }
-            } while (dayChanged);
-
-            updatedDays.add(new DayPlan(
-                    day.dayIndex(),
-                    day.hotel(),
-                    workingStops,
-                    day.theme(),
-                    day.morningNote(),
-                    day.afternoonNote(),
-                    day.eveningNote(),
-                    day.note()
-            ));
-        }
-
-        if (!changed) {
-            return draft;
-        }
-
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
-    }
-
-    private boolean shouldDropAreaInconsistentFlexibleStop(List<Place> stops, int index) {
-        if (index <= 0 || index >= stops.size() - 1) {
-            return false;
-        }
-        Place stop = stops.get(index);
-        if (isThemeParkLikeStop(stop)) {
-            return false;
-        }
-        if (shouldDropThemeParkNearbyFlexibleStop(stops, index)) {
-            return true;
-        }
-        if (isAreaReturnFlexibleStop(stops, index) && isAreaReturnDroppableStop(stop)) {
-            return true;
-        }
-        if (!isFlexibleStop(stop)) {
-            return false;
-        }
-        Place previous = stops.get(index - 1);
-        Place next = stops.get(index + 1);
-        if (isStrictMealStop(previous) && isStrictMealStop(next)) {
-            return false;
-        }
-        if (previous.latitude() == null || stop.latitude() == null || next.latitude() == null) {
-            return false;
-        }
-        double prevToCurrent = haversineMeters(previous.latitude(), previous.longitude(), stop.latitude(), stop.longitude());
-        double currentToNext = haversineMeters(stop.latitude(), stop.longitude(), next.latitude(), next.longitude());
-        double prevToNext = haversineMeters(previous.latitude(), previous.longitude(), next.latitude(), next.longitude());
-        double detourMeters = prevToCurrent + currentToNext - prevToNext;
-        return detourMeters > 12_000 && Math.max(prevToCurrent, currentToNext) > 18_000;
-    }
-
-    private boolean shouldDropThemeParkNearbyFlexibleStop(List<Place> stops, int index) {
-        if (stops == null || index <= 0 || index >= stops.size() - 1) {
-            return false;
-        }
-        Place stop = stops.get(index);
-        if (!isThemeParkDayConnectorCandidate(stop)) {
-            return false;
-        }
-        Place themeParkAnchor = previousThemeParkAnchor(stops, index);
-        if (themeParkAnchor == null) {
-            return false;
-        }
-        Place next = stops.get(index + 1);
-        if (!isStrictMealStop(next)) {
-            return false;
-        }
-        if (themeParkAnchor.latitude() == null || stop.latitude() == null || next.latitude() == null) {
-            return false;
-        }
-
-        double anchorToCurrent = haversineMeters(themeParkAnchor.latitude(), themeParkAnchor.longitude(), stop.latitude(), stop.longitude());
-        double currentToNext = haversineMeters(stop.latitude(), stop.longitude(), next.latitude(), next.longitude());
-        double anchorToNext = haversineMeters(themeParkAnchor.latitude(), themeParkAnchor.longitude(), next.latitude(), next.longitude());
-        double detourMeters = anchorToCurrent + currentToNext - anchorToNext;
-        boolean closeToThemeParkOrDinner = anchorToCurrent <= 1_500 || currentToNext <= 1_500;
-        if (!closeToThemeParkOrDinner && detourMeters > 1_500) {
-            return true;
-        }
-        return anchorToNext <= 1_500 && detourMeters > 1_500;
-    }
-
-    private boolean isThemeParkDayConnectorCandidate(Place stop) {
-        if (stop == null || isStrictMealStop(stop) || isThemeParkLikeStop(stop)) {
-            return false;
-        }
-        String slot = normalizeSlot(stop.timeSlot());
-        return "sunset".equals(slot)
-                || isParkLikeStop(stop)
-                || isFlexibleStop(stop)
-                || isSoftActivityStop(stop);
-    }
-
-    private Place previousThemeParkAnchor(List<Place> stops, int index) {
-        for (int i = index - 1; i >= 0; i--) {
-            Place candidate = stops.get(i);
-            if (isThemeParkLikeStop(candidate)) {
-                return candidate;
-            }
-            if (isStrictMealStop(candidate) && !"lunch".equals(normalizeSlot(candidate.mealType()))
-                    && !"lunch".equals(normalizeSlot(candidate.timeSlot()))) {
-                return null;
-            }
-        }
-        return null;
-    }
-
-    private boolean isAreaReturnFlexibleStop(List<Place> stops, int index) {
-        if (index <= 0 || index >= stops.size() - 1) return false;
-        Place stop = stops.get(index);
-        Place previous = stops.get(index - 1);
-        Place next = stops.get(index + 1);
-        if (isStrictMealStop(stop) || isStrictMealStop(previous)) {
-            return false;
-        }
-        String currentArea = normalizedAreaLabel(stop);
-        String previousArea = normalizedAreaLabel(previous);
-        String nextArea = normalizedAreaLabel(next);
-        if (currentArea.isBlank() || previousArea.isBlank() || nextArea.isBlank()) {
-            return false;
-        }
-        if (areasEquivalent(currentArea, previousArea) || !areasEquivalent(currentArea, nextArea)) {
-            return false;
-        }
-        for (int i = 0; i < index - 1; i++) {
-            Place earlier = stops.get(i);
-            if (!isStrictMealStop(earlier) && areasEquivalent(currentArea, normalizedAreaLabel(earlier))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private boolean isAreaReturnDroppableStop(Place stop) {
-        if (stop == null) return false;
-        String category = normalizeSlot(stop.category());
-        return "park".equals(category) || "nature".equals(category) || "shop".equals(category) || "market".equals(category) || "attraction".equals(category);
     }
 
     private String normalizedAreaLabel(Place stop) {
@@ -4277,60 +1944,6 @@ public class PlanProcessorService {
         }
         if (left.equals(right)) return true;
         return left.contains(right) || right.contains(left);
-    }
-
-    private PlanDraftResponse pruneExcessNonMealStops(PlanDraftResponse draft) {
-        return pruneExcessNonMealStops(draft, null);
-    }
-
-    private PlanDraftResponse pruneExcessNonMealStops(PlanDraftResponse draft, CreatePlanReq req) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-        int maxNonMealStops = maxNonMealStopsPerDay(draft.pace());
-        List<DayPlan> updatedDays = new ArrayList<>();
-        boolean changed = false;
-        for (DayPlan day : draft.daysPlan()) {
-            List<Place> stops = day.stops() == null ? List.of() : day.stops();
-            List<Place> workingStops = new ArrayList<>(stops);
-            while (countNonMealStops(workingStops) > maxNonMealStops) {
-                int dropIndex = lowestValueNonMealStopIndex(workingStops, req);
-                if (dropIndex < 0) {
-                    break;
-                }
-                workingStops.remove(dropIndex);
-                changed = true;
-            }
-            updatedDays.add(new DayPlan(
-                    day.dayIndex(),
-                    day.hotel(),
-                    workingStops,
-                    day.theme(),
-                    day.morningNote(),
-                    day.afternoonNote(),
-                    day.eveningNote(),
-                    day.note()
-            ));
-        }
-        if (!changed) {
-            return draft;
-        }
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
-    }
-
-    private int maxNonMealStopsPerDay(String pace) {
-        return paceNonMealRange(pace).max();
     }
 
     private boolean wouldDropBelowMinNonMealStops(List<Place> stops, Place stop, int minNonMealStops) {
@@ -4350,145 +1963,11 @@ public class PlanProcessorService {
         return count;
     }
 
-    private int lowestValueNonMealStopIndex(List<Place> stops) {
-        return lowestValueNonMealStopIndex(stops, null);
-    }
-
-    private int lowestValueNonMealStopIndex(List<Place> stops, CreatePlanReq req) {
-        int bestIndex = -1;
-        int bestScore = Integer.MAX_VALUE;
-        for (int i = 0; i < stops.size(); i++) {
-            Place stop = stops.get(i);
-            if (!isCountedNonMealStop(stop) || isThemeParkLikeStop(stop) || isSelectedMarketShoppingAnchor(stop, req)) {
-                continue;
-            }
-            int score = nonMealStopValueScore(stops, i);
-            if (score < bestScore) {
-                bestScore = score;
-                bestIndex = i;
-            }
-        }
-        return bestIndex;
-    }
-
     private boolean isCountedNonMealStop(Place stop) {
         if (stop == null || isStrictMealStop(stop) || "hotel".equals(normalizeSlot(stop.category()))) {
             return false;
         }
         return !isMealCategory(normalizeSlot(stop.category()));
-    }
-
-    private int nonMealStopValueScore(List<Place> stops, int index) {
-        Place stop = stops.get(index);
-        Place previousStop = index > 0 ? stops.get(index - 1) : null;
-        int score = 50 + attractionStrength(stop, previousStop) * 10;
-        String category = normalizeSlot(stop.category());
-        int stayMinutes = resolveStayMinutes(stop);
-        if (isStrongPoiCandidate(stop)) score += 40;
-        if (isParkLikeStop(stop)) score += 20;
-        if ("museum".equals(category)) score += 30;
-        if ("attraction".equals(category)) score += 5;
-        if (stayMinutes <= 30) score -= 25;
-        if (stayMinutes <= 45) score -= 10;
-        if ("sunset".equals(normalizeSlot(stop.timeSlot()))) score -= 10;
-        if (isLightweightStop(stop, previousStop)) score -= 30;
-        if (index == 0) score += 8;
-        String reason = nullToEmpty(stop.reason()).toLowerCase();
-        if (reason.contains("punctuation mark") || reason.contains("brief stop")) {
-            score -= 20;
-        }
-        return score;
-    }
-
-    private int attractionStrength(Place stop, Place previousStop) {
-        if (stop == null || isStrictMealStop(stop) || "hotel".equals(normalizeSlot(stop.category()))) {
-            return 10;
-        }
-        String category = normalizeSlot(stop.category());
-        int score = switch (category) {
-            case "museum", "gallery", "theme_park" -> 5;
-            case "park", "nature" -> 4;
-            case "shop", "market" -> 2;
-            case "attraction" -> 2;
-            default -> 2;
-        };
-
-        int stayMinutes = resolveStayMinutes(stop);
-        if (stayMinutes <= 30) {
-            score -= 2;
-        } else if (stayMinutes <= 50) {
-            score -= 1;
-        } else if (stayMinutes >= 75) {
-            score += 1;
-        }
-
-        String name = nullToEmpty(stop.name()).toLowerCase();
-        String text = name + " " + nullToEmpty(stop.addressLine()).toLowerCase();
-        if (hasLightweightKeyword(text)) {
-            score -= 2;
-        }
-        if (isAttachedToPreviousStop(stop, previousStop)) {
-            score -= 2;
-        }
-        if (isStrongPoiCandidate(stop)) {
-            score += 2;
-        }
-        if ("museum".equals(category) && stayMinutes >= 60) {
-            score += 2;
-        }
-        return score;
-    }
-
-    private boolean hasLightweightKeyword(String text) {
-        if (text == null || text.isBlank()) {
-            return false;
-        }
-        return text.contains("rooftop")
-                || text.contains("terrace")
-                || text.contains("forecourt")
-                || text.contains("plaza")
-                || text.contains("mall")
-                || text.contains(" riverwalk")
-                || text.contains("walk ")
-                || text.contains("promenade")
-                || text.contains("lagoon")
-                || text.contains("square")
-                || text.contains("exterior");
-    }
-
-    private boolean isAttachedToPreviousStop(Place stop, Place previousStop) {
-        if (stop == null || previousStop == null) {
-            return false;
-        }
-        String currentName = nullToEmpty(stop.name()).toLowerCase();
-        String previousName = nullToEmpty(previousStop.name()).toLowerCase();
-        if (currentName.isBlank() || previousName.isBlank()) {
-            return false;
-        }
-        boolean nameLooksAttached = currentName.contains(previousName)
-                || previousName.contains(currentName)
-                || sharesMeaningfulToken(currentName, previousName);
-        boolean sameArea = !nullToEmpty(stop.addressLine()).isBlank()
-                && !nullToEmpty(previousStop.addressLine()).isBlank()
-                && normalizedAddressAnchor(stop.addressLine()).equals(normalizedAddressAnchor(previousStop.addressLine()));
-        return nameLooksAttached && sameArea;
-    }
-
-    private boolean sharesMeaningfulToken(String left, String right) {
-        for (String token : left.split("[^a-z0-9]+")) {
-            if (token.length() >= 4 && right.contains(token)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private String normalizedAddressAnchor(String value) {
-        if (value == null) return "";
-        String[] parts = value.split(",");
-        if (parts.length == 0) return "";
-        String first = parts[0].trim().toLowerCase();
-        return first.replaceAll("^\\d+\\s+", "");
     }
 
     private boolean isStrongPoiCandidate(Place stop) {
@@ -4500,10 +1979,6 @@ public class PlanProcessorService {
         }
         String name = stop.name() == null ? "" : stop.name().toLowerCase();
         return name.contains("cathedral") || name.contains("parliament") || name.contains("opera house") || name.contains("bridge") && name.contains("harbour");
-    }
-
-    private boolean isLightweightStop(Place stop, Place previousStop) {
-        return attractionStrength(stop, previousStop) <= 2;
     }
 
     private List<Place> reorderStopsByTimeSlotIfMealOrderInvalid(List<Place> stops) {
@@ -4757,38 +2232,6 @@ public class PlanProcessorService {
         };
     }
 
-    private List<Integer> resolveTransferMinutesInParallel(
-            List<Place> stops,
-            List<StopCoordinate> coordinates,
-            RouteRecommendationContext recommendationContext
-    ) {
-        if (stops == null || stops.isEmpty()) {
-            return List.of();
-        }
-        List<Integer> transfers = new ArrayList<>(Collections.nCopies(stops.size(), 0));
-        if (stops.size() == 1) {
-            return transfers;
-        }
-        Map<RouteChoiceCacheKey, RouteChoice> routeChoiceCache = new ConcurrentHashMap<>();
-        ExecutorService executor = Executors.newFixedThreadPool(Math.min(3, stops.size() - 1));
-        try {
-            List<CompletableFuture<Integer>> futures = new ArrayList<>();
-            for (int i = 1; i < stops.size(); i++) {
-                final int index = i;
-                futures.add(CompletableFuture.supplyAsync(
-                        () -> routeAwareTransitionMinutes(stops, coordinates, index, recommendationContext, routeChoiceCache),
-                        executor
-                ));
-            }
-            for (int i = 1; i < stops.size(); i++) {
-                transfers.set(i, joinInteger(futures.get(i - 1), transitionMinutes(false)));
-            }
-            return transfers;
-        } finally {
-            executor.shutdownNow();
-        }
-    }
-
     public StopCoordinate resolveStopCoordinateSafely(Place stop) {
         StopLocation location = resolveStopLocationSafely(stop);
         return location == null ? null : new StopCoordinate(location.lat(), location.lon());
@@ -4916,470 +2359,14 @@ public class PlanProcessorService {
         return new StopLocation(stop.latitude(), stop.longitude(), null);
     }
 
-    private int routeAwareTransitionMinutes(
-            List<Place> stops,
-            List<StopCoordinate> coordinates,
-            int index,
-            RouteRecommendationContext recommendationContext,
-            Map<RouteChoiceCacheKey, RouteChoice> routeChoiceCache
-    ) {
-        if (index == 0) {
-            return 0;
-        }
-        int fallback = transitionMinutes(false);
-        if (stops == null || coordinates == null || index >= stops.size() || index >= coordinates.size()) {
-            return fallback;
-        }
-        Place previous = stops.get(index - 1);
-        Place current = stops.get(index);
-        if (isThemeParkLunchToContinuation(previous, current)) {
-            return 0;
-        }
-        StopCoordinate origin = coordinates.get(index - 1);
-        StopCoordinate destination = coordinates.get(index);
-        if (origin == null || destination == null) {
-            return fallback;
-        }
-        Integer lightweightTransfer = estimateSchedulingTransferMinutes(previous, current, origin, destination, recommendationContext);
-        int buffered;
-        if (lightweightTransfer != null) {
-            buffered = lightweightTransfer;
-        } else {
-            RouteChoice routeChoice = shortWalkRouteChoice(previous, current, origin, destination, recommendationContext, false);
-            if (routeChoice == null) {
-                routeChoice = resolveRouteChoice(origin.asLatLon(), destination.asLatLon(), recommendationContext, false, routeChoiceCache);
-            }
-            ModeSummary recommended = routeChoice.recommended();
-            if (recommended == null || recommended.durationMinutes() == null || recommended.durationMinutes() <= 0) {
-                return fallback;
-            }
-            buffered = recommended.durationMinutes() + 5;
-        }
-        int allowedCap = maxAllowedGapMinutes(previous, current, index == stops.size() - 1);
-        if (hasMealSlot(current, "lunch")) {
-            int previousEnd = parseTimeMinutes(previous.endTime());
-            if (!isThemeParkLikeStop(previous) && previousEnd >= 0 && previousEnd < LUNCH_LATEST_START_MINUTES + 5) {
-                allowedCap = Math.min(allowedCap, Math.max(transitionMinutes(false), LUNCH_LATEST_START_MINUTES + 5 - previousEnd));
-            }
-        }
-        if (hasMealSlot(current, "dinner") && hasThemeParkBeforeIndex(stops, index)) {
-            int previousEnd = parseTimeMinutes(previous.endTime());
-            if (previousEnd >= 0 && previousEnd < THEME_PARK_DAY_DINNER_LATEST_START_MINUTES) {
-                allowedCap = Math.min(
-                        allowedCap,
-                        Math.max(transitionMinutes(false), THEME_PARK_DAY_DINNER_LATEST_START_MINUTES - previousEnd)
-                );
-            }
-        }
-        return Math.max(fallback, Math.min(buffered, allowedCap));
-    }
-
-    private Integer estimateSchedulingTransferMinutes(
-            Place previous,
-            Place current,
-            StopCoordinate origin,
-            StopCoordinate destination,
-            RouteRecommendationContext context
-    ) {
-        if (previous == null || current == null || origin == null || destination == null) {
-            return null;
-        }
-        if (context != null && context.hasKids()) {
-            return null;
-        }
-        if (isThemeParkLikeStop(previous) || isThemeParkLikeStop(current)) {
-            return null;
-        }
-
-        double straightLineMeters = haversineMeters(origin.lat(), origin.lon(), destination.lat(), destination.lon());
-        if (sameStopOrAddress(previous, current) && straightLineMeters <= SCHEDULING_DIRECT_WALK_ESTIMATE_MAX_DISTANCE_METERS) {
-            return estimateShortWalkMinutes((int) Math.ceil(straightLineMeters)) + 5;
-        }
-        if (straightLineMeters <= SCHEDULING_DIRECT_WALK_ESTIMATE_MAX_DISTANCE_METERS && !isStrictMealStop(previous) && !isStrictMealStop(current)) {
-            return estimateShortWalkMinutes((int) Math.ceil(straightLineMeters)) + 5;
-        }
-        if (sameCulturalPrecinct(previous, current) && straightLineMeters <= SCHEDULING_CULTURAL_PRECINCT_WALK_ESTIMATE_MAX_DISTANCE_METERS) {
-            return estimateShortWalkMinutes((int) Math.ceil(straightLineMeters)) + 5;
-        }
-        String previousArea = normalizedAreaLabel(previous);
-        String currentArea = normalizedAreaLabel(current);
-        if (areasEquivalent(previousArea, currentArea)
-                && straightLineMeters <= SCHEDULING_SAME_AREA_WALK_ESTIMATE_MAX_DISTANCE_METERS
-                && !requiresExternalRoutingForScheduling(previous, current)) {
-            return estimateShortWalkMinutes((int) Math.ceil(straightLineMeters)) + 5;
-        }
-        if (sameAreaFallbackAllowed(previous, current)
-                && straightLineMeters <= SCHEDULING_SAME_SUBURB_WALK_ESTIMATE_MAX_DISTANCE_METERS
-                && !requiresExternalRoutingForScheduling(previous, current)) {
-            return estimateShortWalkMinutes((int) Math.ceil(straightLineMeters)) + 5;
-        }
-        return null;
-    }
-
-    private boolean requiresExternalRoutingForScheduling(Place previous, Place current) {
-        return isLateDayViewStop(previous)
-                || isLateDayViewStop(current)
-                || isThemeParkLikeStop(previous)
-                || isThemeParkLikeStop(current);
-    }
-
-    private boolean sameStopOrAddress(Place previous, Place current) {
-        if (previous == null || current == null) {
-            return false;
-        }
-        String previousMap = normalizeSlot(previous.googleMapsUri());
-        String currentMap = normalizeSlot(current.googleMapsUri());
-        if (!previousMap.isBlank() && previousMap.equals(currentMap)) {
-            return true;
-        }
-        String previousAddress = normalizeSlot(previous.addressLine());
-        String currentAddress = normalizeSlot(current.addressLine());
-        return !previousAddress.isBlank() && previousAddress.equals(currentAddress);
-    }
-
-    private boolean sameCulturalPrecinct(Place previous, Place current) {
-        if (previous == null || current == null) {
-            return false;
-        }
-        if (!isCulturalPrecinctStop(previous) || !isCulturalPrecinctStop(current)) {
-            return false;
-        }
-        String previousArea = normalizedAreaLabel(previous);
-        String currentArea = normalizedAreaLabel(current);
-        return areasEquivalent(previousArea, currentArea) || sameAreaFallbackAllowed(previous, current);
-    }
-
-    private boolean isCulturalPrecinctStop(Place stop) {
-        if (stop == null || isStrictMealStop(stop)) {
-            return false;
-        }
-        String category = normalizeSlot(stop.category());
-        return "museum".equals(category)
-                || "gallery".equals(category)
-                || "cultural".equals(category)
-                || "heritage".equals(category)
-                || "art_gallery".equals(category);
-    }
-
-    private RouteChoice shortWalkRouteChoice(
-            Place previous,
-            Place current,
-            StopCoordinate origin,
-            StopCoordinate destination,
-            RouteRecommendationContext context,
-            boolean rainy
-    ) {
-        if (!shouldUseShortWalkEstimate(previous, current, origin, destination, context, rainy)) {
-            return null;
-        }
-        int distanceMeters = (int) Math.ceil(haversineMeters(origin.lat(), origin.lon(), destination.lat(), destination.lon()));
-        int estimatedMinutes = estimateShortWalkMinutes(distanceMeters);
-        ModeSummary walk = new ModeSummary("walk", estimatedMinutes, distanceMeters);
-        return new RouteChoice(walk, null, null, walk);
-    }
-
-    private boolean shouldUseShortWalkEstimate(
-            Place previous,
-            Place current,
-            StopCoordinate origin,
-            StopCoordinate destination,
-            RouteRecommendationContext context,
-            boolean rainy
-    ) {
-        if (previous == null || current == null || origin == null || destination == null) {
-            return false;
-        }
-        if (rainy || (context != null && context.hasKids())) {
-            return false;
-        }
-        if (isThemeParkLikeStop(previous) || isThemeParkLikeStop(current)) {
-            return false;
-        }
-        if (hasMealSlot(previous, "lunch") || hasMealSlot(previous, "dinner")
-                || hasMealSlot(current, "lunch") || hasMealSlot(current, "dinner")) {
-            return false;
-        }
-        if (isCulturalOpeningHoursConstrained(previous) || isCulturalOpeningHoursConstrained(current)
-                || isLateDayViewStop(previous) || isLateDayViewStop(current)) {
-            return false;
-        }
-        String previousArea = normalizedAreaLabel(previous);
-        String currentArea = normalizedAreaLabel(current);
-        boolean sameArea = areasEquivalent(previousArea, currentArea);
-        double straightLineMeters = haversineMeters(origin.lat(), origin.lon(), destination.lat(), destination.lon());
-        if (sameArea) {
-            return straightLineMeters <= SHORT_WALK_ESTIMATE_MAX_DISTANCE_METERS;
-        }
-        return sameAreaFallbackAllowed(previous, current) && straightLineMeters <= SHORT_WALK_ESTIMATE_STRICT_AREA_DISTANCE_METERS;
-    }
-
-    private boolean sameAreaFallbackAllowed(Place previous, Place current) {
-        String previousSuburb = normalizeSlot(previous == null ? null : previous.suburb());
-        String currentSuburb = normalizeSlot(current == null ? null : current.suburb());
-        String previousCity = normalizeSlot(previous == null ? null : previous.city());
-        String currentCity = normalizeSlot(current == null ? null : current.city());
-        return !previousSuburb.isBlank()
-                && previousSuburb.equals(currentSuburb)
-                && !previousCity.isBlank()
-                && previousCity.equals(currentCity);
-    }
-
-    private int estimateShortWalkMinutes(int distanceMeters) {
-        int walkingMinutes = (int) Math.ceil(Math.max(0, distanceMeters) / SHORT_WALK_ESTIMATE_METERS_PER_MINUTE);
-        return Math.max(SHORT_WALK_ESTIMATE_MIN_MINUTES, walkingMinutes + SHORT_WALK_ESTIMATE_BUFFER_MINUTES);
-    }
-
-    private boolean isThemeParkLunchToContinuation(Place previous, Place current) {
-        return hasMealSlot(previous, "lunch")
-                && isThemeParkContinuationStop(current)
-                && isSameThemeParkCluster(current, previous);
-    }
-
-    private boolean isThemeParkContinuationStop(Place stop) {
-        if (!isThemeParkLikeStop(stop) || !"afternoon".equals(normalizeSlot(stop.timeSlot()))) {
-            return false;
-        }
-        String name = nullToEmpty(stop.name()).toLowerCase(Locale.ROOT);
-        return name.contains("(afternoon)")
-                || name.contains("afternoon visit")
-                || name.contains("continued visit")
-                || name.contains("continuation")
-                || name.contains("return visit");
-    }
-
-    private RouteChoice resolveRouteChoice(
-            String origin,
-            String destination,
-            RouteRecommendationContext context,
-            boolean rainy,
-            Map<RouteChoiceCacheKey, RouteChoice> routeChoiceCache
-    ) {
-        if (origin == null || origin.isBlank() || destination == null || destination.isBlank()) {
-            return new RouteChoice(null, null, null, null);
-        }
-        RouteChoiceCacheKey cacheKey = routeChoiceCacheKey(origin, destination, rainy, context);
-        if (routeChoiceCache != null) {
-            RouteChoice requestScoped = routeChoiceCache.get(cacheKey);
-            if (requestScoped != null) {
-                return requestScoped;
-            }
-        }
-        RouteChoice crossRequestCached = getRouteChoiceFromHybridCache(cacheKey);
-        if (crossRequestCached != null) {
-            if (routeChoiceCache != null) {
-                routeChoiceCache.put(cacheKey, crossRequestCached);
-            }
-            return crossRequestCached;
-        }
-        RouteChoice computed = computeRouteChoice(origin, destination, context, rainy);
-        putRouteChoiceIntoHybridCache(cacheKey, computed);
-        if (routeChoiceCache != null) {
-            routeChoiceCache.put(cacheKey, computed);
-        }
-        return computed;
-    }
-
-    private RouteChoice getRouteChoiceFromHybridCache(RouteChoiceCacheKey cacheKey) {
-        RouteChoice local = ROUTE_CHOICE_L1_CACHE.getIfPresent(cacheKey);
-        if (local != null) {
-            return local;
-        }
-        if (stringRedisTemplate == null) {
-            return null;
-        }
-        try {
-            String payload = stringRedisTemplate.opsForValue().get(routeChoiceRedisKey(cacheKey));
-            if (payload == null || payload.isBlank()) {
-                return null;
-            }
-            RouteChoice cached = objectMapper.readValue(payload, RouteChoice.class);
-            ROUTE_CHOICE_L1_CACHE.put(cacheKey, cached);
-            return cached;
-        } catch (Exception ex) {
-            return null;
-        }
-    }
-
-    private void putRouteChoiceIntoHybridCache(RouteChoiceCacheKey cacheKey, RouteChoice routeChoice) {
-        if (routeChoice == null) {
-            return;
-        }
-        ROUTE_CHOICE_L1_CACHE.put(cacheKey, routeChoice);
-        if (stringRedisTemplate == null) {
-            return;
-        }
-        try {
-            String payload = objectMapper.writeValueAsString(routeChoice);
-            stringRedisTemplate.opsForValue().set(routeChoiceRedisKey(cacheKey), payload, ttlWithJitter(ROUTE_CHOICE_CACHE_TTL));
-        } catch (Exception ex) {
-            // Best-effort cache write only.
-        }
-    }
-
-    private Duration ttlWithJitter(Duration baseTtl) {
-        long baseMillis = baseTtl == null ? 0L : baseTtl.toMillis();
-        if (baseMillis <= 0L) {
-            return baseTtl;
-        }
-        long jitterRange = Math.max(1L, Math.round(baseMillis * REDIS_TTL_JITTER_RATIO));
-        long offset = ThreadLocalRandom.current().nextLong(-jitterRange, jitterRange + 1L);
-        return Duration.ofMillis(Math.max(1_000L, baseMillis + offset));
-    }
-
-    private String routeChoiceRedisKey(RouteChoiceCacheKey cacheKey) {
-        return ROUTE_CHOICE_REDIS_PREFIX
-                + cacheKey.origin()
-                + "|"
-                + cacheKey.destination()
-                + "|r="
-                + (cacheKey.rainy() ? "1" : "0")
-                + "|k="
-                + (cacheKey.hasKids() ? "1" : "0");
-    }
-
-    private RouteChoiceCacheKey routeChoiceCacheKey(String origin, String destination, boolean rainy, RouteRecommendationContext context) {
-        boolean hasKids = context != null && context.hasKids();
-        return new RouteChoiceCacheKey(normalizeLatLonKey(origin), normalizeLatLonKey(destination), rainy, hasKids);
-    }
-
-    private String normalizeLatLonKey(String raw) {
-        if (raw == null || raw.isBlank()) {
-            return "";
-        }
-        String[] parts = raw.trim().split(",");
-        if (parts.length != 2) {
-            return raw.trim();
-        }
-        try {
-            double lat = Double.parseDouble(parts[0].trim());
-            double lon = Double.parseDouble(parts[1].trim());
-            return roundCoordinate(lat) + "," + roundCoordinate(lon);
-        } catch (NumberFormatException ex) {
-            return raw.trim();
-        }
-    }
-
-    private String roundCoordinate(double value) {
-        return String.format(Locale.ROOT, "%.5f", value);
-    }
-
-    private RouteChoice computeRouteChoice(String origin, String destination, RouteRecommendationContext context, boolean rainy) {
-        ModeSummary walk = modeSummary("walk", () -> withBulkhead(ROUTE_SUMMARY_BULKHEAD, () -> mapService.walk_summary(origin, destination), null));
-        boolean hasKids = context != null && context.hasKids();
-        int walkDirectThreshold = hasKids ? 15 : 20;
-        if (rainy) {
-            walkDirectThreshold = Math.min(walkDirectThreshold, 10);
-        }
-        if (walk != null && walk.durationMinutes() <= walkDirectThreshold) {
-            return new RouteChoice(walk, null, null, walk);
-        }
-
-        ModeSummary transit = modeSummary("transit", () -> withBulkhead(ROUTE_SUMMARY_BULKHEAD, () -> mapService.transit_summary(origin, destination), null));
-        int walkCompareThreshold = hasKids ? 20 : 30;
-        if (rainy) {
-            walkCompareThreshold = Math.min(walkCompareThreshold, 15);
-        }
-        if (transit != null) {
-            if (walk != null && walk.durationMinutes() <= walkCompareThreshold && transit.durationMinutes() - walk.durationMinutes() > -8) {
-                return new RouteChoice(walk, transit, null, walk);
-            }
-            if (transit.durationMinutes() < 35) {
-                return new RouteChoice(walk, transit, null, transit);
-            }
-        }
-
-        ModeSummary car = normalizeCarSummary(modeSummary("car", () -> withBulkhead(ROUTE_SUMMARY_BULKHEAD, () -> mapService.car_summary(origin, destination), null)));
-        ModeSummary recommended = recommendMode(walk, transit, car, context, rainy);
-        return new RouteChoice(walk, transit, car, recommended);
-    }
-
-    private record RouteChoiceCacheKey(String origin, String destination, boolean rainy, boolean hasKids) {}
     private record GapClampPair(Place previous, Place current) {}
 
     void clearRouteChoiceCrossRequestCache() {
-        ROUTE_CHOICE_L1_CACHE.invalidateAll();
-        if (stringRedisTemplate != null) {
-            try {
-                var keys = stringRedisTemplate.keys(ROUTE_CHOICE_REDIS_PREFIX + "*");
-                if (keys != null && !keys.isEmpty()) {
-                    stringRedisTemplate.delete(keys);
-                }
-            } catch (Exception ex) {
-                // Best-effort cache cleanup only.
-            }
-        }
+        routePlanningService.clearRouteChoiceCrossRequestCache();
     }
 
     void clearRouteChoiceLocalCacheOnly() {
-        ROUTE_CHOICE_L1_CACHE.invalidateAll();
-    }
-
-    private ModeSummary modeSummary(String mode, RouteSummarySupplier supplier) {
-        try {
-            MapService.RouteSummary summary = supplier.get();
-            if (summary == null || summary.durationSeconds() == null || summary.durationSeconds().isBlank()) {
-                return null;
-            }
-            Integer durationMinutes = routeSummaryMinutes(() -> summary);
-            Integer distanceMeters = parseInteger(summary.distanceMeters());
-            if (durationMinutes == null || durationMinutes <= 0) {
-                return null;
-            }
-            return new ModeSummary(mode, durationMinutes, distanceMeters);
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
-    private ModeSummary normalizeCarSummary(ModeSummary car) {
-        if (car == null || car.distanceMeters() == null || car.distanceMeters() <= 0) {
-            return car;
-        }
-        int urbanFloor = Math.max(5, (int) Math.ceil((car.distanceMeters() / 1000.0) / 25.0 * 60.0) + 3);
-        int normalizedMinutes = Math.max(car.durationMinutes(), urbanFloor);
-        return new ModeSummary(car.mode(), normalizedMinutes, car.distanceMeters());
-    }
-
-    private ModeSummary recommendMode(ModeSummary walk, ModeSummary transit, ModeSummary car, RouteRecommendationContext context, boolean rainy) {
-        boolean hasKids = context != null && context.hasKids();
-        int walkDirectThreshold = hasKids ? 15 : 20;
-        int walkCompareThreshold = hasKids ? 20 : 30;
-        if (rainy) {
-            walkDirectThreshold = Math.min(walkDirectThreshold, 10);
-            walkCompareThreshold = Math.min(walkCompareThreshold, 15);
-        }
-        if (walk != null && walk.durationMinutes() <= walkDirectThreshold) {
-            return walk;
-        }
-        if (transit != null) {
-            if (walk != null && walk.durationMinutes() <= walkCompareThreshold && transit.durationMinutes() - walk.durationMinutes() > -8) {
-                return walk;
-            }
-            if (car != null && transit.durationMinutes() - car.durationMinutes() >= 20) {
-                return car;
-            }
-            return transit;
-        }
-        if (car != null) {
-            return car;
-        }
-        return walk;
-    }
-
-    private Integer routeSummaryMinutes(RouteSummarySupplier supplier) {
-        try {
-            MapService.RouteSummary summary = supplier.get();
-            if (summary == null || summary.durationSeconds() == null || summary.durationSeconds().isBlank()) {
-                return null;
-            }
-            int seconds = (int) Math.round(Double.parseDouble(summary.durationSeconds().trim()));
-            if (seconds <= 0) {
-                return null;
-            }
-            return Math.max(1, (int) Math.ceil(seconds / 60.0));
-        } catch (RuntimeException e) {
-            return null;
-        }
+        routePlanningService.clearRouteChoiceLocalCacheOnly();
     }
 
     private StopCoordinate joinNullable(CompletableFuture<StopCoordinate> future) {
@@ -5387,15 +2374,6 @@ public class PlanProcessorService {
             return future.join();
         } catch (CompletionException e) {
             return null;
-        }
-    }
-
-    private int joinInteger(CompletableFuture<Integer> future, int fallback) {
-        try {
-            Integer value = future.join();
-            return value == null ? fallback : value;
-        } catch (CompletionException e) {
-            return fallback;
         }
     }
 
@@ -5430,7 +2408,7 @@ public class PlanProcessorService {
         if (draft == null || validationIssues == null || validationIssues.isEmpty()) {
             return null;
         }
-        boolean deterministicRepairOnly = validationIssues.stream().allMatch(this::isDeterministicRepairIssue);
+        boolean deterministicRepairOnly = validationIssues.stream().allMatch(planQualityService::isDeterministicRepairIssue);
         if (!deterministicRepairOnly) {
             return null;
         }
@@ -5443,43 +2421,7 @@ public class PlanProcessorService {
                     repairedIssues);
         }
         qualityStages.add(captureStageMetrics(attemptLabel + "/deterministic_fallback", repaired, req, repairedIssues));
-        return new PlanRepairPipelineService.DeterministicFallbackResult(repaired, repairedIssues, repairedIssues.isEmpty());
-    }
-
-    private boolean isDeterministicRepairIssue(String issue) {
-        if (issue == null) {
-            return false;
-        }
-        return issue.endsWith("-gap-too-large")
-                || issue.endsWith("-lunch-time-invalid")
-                || issue.endsWith("-dinner-time-invalid")
-                || issue.endsWith("-dinner-too-early")
-                || issue.endsWith("-theme-park-dinner-too-late")
-                || issue.endsWith("-time-sensitive-too-late")
-                || issue.endsWith("-duplicate-poi-same-day")
-                || issue.endsWith("-duplicate-poi-across-days");
-    }
-
-    private boolean isDuplicateDominatedDeterministicFailure(List<String> validationIssues) {
-        if (validationIssues == null || validationIssues.isEmpty()) {
-            return false;
-        }
-        int duplicateCount = 0;
-        int otherDeterministicCount = 0;
-        for (String issue : validationIssues) {
-            if (issue == null || issue.isBlank()) {
-                return false;
-            }
-            if (issue.endsWith("-duplicate-poi-across-days") || issue.endsWith("-duplicate-poi-same-day")) {
-                duplicateCount++;
-                continue;
-            }
-            if (!isDeterministicRepairIssue(issue)) {
-                return false;
-            }
-            otherDeterministicCount++;
-        }
-        return duplicateCount > 0 && duplicateCount > otherDeterministicCount;
+        return new PlanRepairPipelineService.DeterministicFallbackResult(PlanDraft.fromResponse(repaired), repairedIssues, repairedIssues.isEmpty());
     }
 
     private PlanDraftResponse localRescueBeforeRetryIfValid(
@@ -5527,7 +2469,7 @@ public class PlanProcessorService {
         if (issue == null || issue.isBlank()) {
             return false;
         }
-        if (isDeterministicRepairIssue(issue)) {
+        if (planQualityService.isDeterministicRepairIssue(issue)) {
             return true;
         }
         return issue.endsWith("-missing-lunch")
@@ -5544,666 +2486,73 @@ public class PlanProcessorService {
             StringBuilder stageSummary,
             StringBuilder timingSummary
     ) {
-        long stageStartedAt = System.currentTimeMillis();
-        PlanDraftResponse repaired = draft;
-        for (int pass = 0; pass < DETERMINISTIC_REPAIR_MAX_PASSES; pass++) {
-            List<String> currentIssues = collectDeterministicValidationIssues(repaired);
-            if (currentIssues.isEmpty()) {
-                break;
-            }
-            String beforeSnapshot = deterministicRepairSnapshot(repaired);
-            java.util.Set<Integer> changedDayIndexes = new java.util.LinkedHashSet<>();
-
-            if (hasAnyIssue(currentIssues, "-time-sensitive-too-late")) {
-                PlanDraftResponse beforeTimeSensitiveRepair = repaired;
-                repaired = repairTimeSensitiveLateStops(repaired);
-                changedDayIndexes.addAll(detectChangedDayIndexes(beforeTimeSensitiveRepair, repaired));
-            }
-
-            if (hasAnyIssue(currentIssues, "-lunch-time-invalid")
-                    || hasAnyIssue(currentIssues, "-dinner-time-invalid")
-                    || hasAnyIssue(currentIssues, "-dinner-too-early")
-                    || hasAnyIssue(currentIssues, "-theme-park-dinner-too-late")) {
-                PlanDraftResponse beforeMealTimeRepair = repaired;
-                repaired = repairMealTimeWindowIssues(repaired);
-                changedDayIndexes.addAll(detectChangedDayIndexes(beforeMealTimeRepair, repaired));
-            }
-
-            if (hasAnyIssue(currentIssues, "-duplicate-poi-across-days")) {
-                PlanDraftResponse beforeDuplicateRepair = repaired;
-                repaired = repairCrossDayDuplicatePois(repaired);
-                changedDayIndexes.addAll(detectChangedDayIndexes(beforeDuplicateRepair, repaired));
-            }
-
-            if (hasAnyIssue(currentIssues, "-duplicate-poi-same-day")) {
-                PlanDraftResponse beforeDuplicateRepair = repaired;
-                repaired = repairSameDayDuplicatePois(repaired);
-                changedDayIndexes.addAll(detectChangedDayIndexes(beforeDuplicateRepair, repaired));
-            }
-
-            if (!changedDayIndexes.isEmpty()) {
-                repaired = normalizeDraftScheduleWithRouteDurations(repaired, changedDayIndexes);
-            }
-
-            List<String> issuesAfterTargetedRepairs = collectDeterministicValidationIssues(repaired);
-            if (issuesAfterTargetedRepairs.isEmpty()) {
-                break;
-            }
-            if (hasAnyIssue(issuesAfterTargetedRepairs, "-gap-too-large")) {
-                repaired = clampOversizedGaps(repaired);
-                repaired = bridgeSmallDeterministicGapOverruns(repaired);
-            }
-            if (beforeSnapshot.equals(deterministicRepairSnapshot(repaired))) {
-                break;
-            }
-        }
-        appendStageTiming(timingSummary, attemptLabel + "/deterministic-repair", System.currentTimeMillis() - stageStartedAt);
-        logPlanStageCounts(stageSummary, attemptLabel, "deterministic-repair", repaired);
-        return repaired;
-    }
-
-    private String deterministicRepairSnapshot(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return "";
-        }
-        return draft.daysPlan().stream()
-                .filter(day -> day != null)
-                .map(day -> day.dayIndex() + ":"
-                        + (day.stops() == null ? "" : day.stops().stream()
-                        .map(stop -> safeStopName(stop) + "@" + nullToEmpty(stop.startTime()) + "-" + nullToEmpty(stop.endTime()))
-                        .collect(Collectors.joining("|"))))
-                .collect(Collectors.joining(" || "));
+        PlanDraft repaired = planQualityService.repairDeterministically(
+                PlanDraft.fromResponse(draft),
+                attemptLabel,
+                stageSummary,
+                timingSummary,
+                deterministicRepairOperations()
+        );
+        return repaired == null ? null : repaired.toResponse();
     }
 
     private List<String> collectDeterministicValidationIssues(PlanDraftResponse draft) {
-        return validateDraft(draft).stream()
-                .filter(this::isDeterministicRepairIssue)
-                .toList();
+        return planQualityService.collectDeterministicValidationIssues(PlanDraft.fromResponse(draft), deterministicRepairOperations());
+    }
+
+    private DeterministicPlanRepairService.Operations deterministicRepairOperations() {
+        return new DeterministicPlanRepairService.Operations() {
+            @Override
+            public List<String> validateDraft(PlanDraft draft) {
+                return PlanProcessorService.this.validateDraft(draft == null ? null : draft.toResponse());
+            }
+
+            @Override
+            public PlanDraft repairTimeSensitiveLateStops(PlanDraft draft) {
+                PlanDraftResponse repaired = PlanProcessorService.this.repairTimeSensitiveLateStops(draft == null ? null : draft.toResponse());
+                return PlanDraft.fromResponse(repaired);
+            }
+
+            @Override
+            public PlanDraft clampOversizedGaps(PlanDraft draft) {
+                PlanDraftResponse repaired = PlanProcessorService.this.clampOversizedGaps(draft == null ? null : draft.toResponse());
+                return PlanDraft.fromResponse(repaired);
+            }
+
+            @Override
+            public PlanDraft bridgeSmallDeterministicGapOverruns(PlanDraft draft) {
+                PlanDraftResponse repaired = PlanProcessorService.this.bridgeSmallDeterministicGapOverruns(draft == null ? null : draft.toResponse());
+                return PlanDraft.fromResponse(repaired);
+            }
+
+            @Override
+            public PlanDraft normalizeDraftScheduleWithRouteDurations(PlanDraft draft, java.util.Set<Integer> targetDayIndexes) {
+                PlanDraftResponse repaired = PlanProcessorService.this.normalizeDraftScheduleWithRouteDurations(draft == null ? null : draft.toResponse(), targetDayIndexes);
+                return PlanDraft.fromResponse(repaired);
+            }
+
+            @Override
+            public java.util.Set<Integer> detectChangedDayIndexes(PlanDraft before, PlanDraft after) {
+                return PlanProcessorService.this.detectChangedDayIndexes(
+                        before == null ? null : before.toResponse(),
+                        after == null ? null : after.toResponse()
+                );
+            }
+
+            @Override
+            public void appendStageTiming(StringBuilder timingSummary, String stage, long ms) {
+                PlanProcessorService.this.appendStageTiming(timingSummary, stage, ms);
+            }
+
+            @Override
+            public void logPlanStageCounts(StringBuilder stageSummary, String attemptLabel, String stage, PlanDraft draft) {
+                PlanProcessorService.this.logPlanStageCounts(stageSummary, attemptLabel, stage, draft == null ? null : draft.toResponse());
+            }
+        };
     }
 
     PlanDraftResponse repairMealTimeWindowIssues(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-        int minNonMealStops = minNonMealStopsPerDay(draft.pace());
-        List<DayPlan> updatedDays = new ArrayList<>();
-        boolean changed = false;
-        for (DayPlan day : draft.daysPlan()) {
-            if (day == null || day.stops() == null || day.stops().isEmpty()) {
-                updatedDays.add(day);
-                continue;
-            }
-            List<Place> updatedStops = new ArrayList<>(day.stops());
-            boolean dayChanged = false;
-            for (int i = 0; i < updatedStops.size(); i++) {
-                Place stop = updatedStops.get(i);
-                int start = parseTimeMinutes(stop.startTime());
-                if (start < 0 || (!hasMealSlot(stop, "lunch") && !hasMealSlot(stop, "dinner"))) {
-                    continue;
-                }
-                int earliest = mealEarliestStart(stop);
-                int latest = mealLatestStart(updatedStops, i);
-                if (start >= earliest && start <= latest) {
-                    continue;
-                }
-                if (start < earliest) {
-                    updatedStops.set(i, copyPlaceWithTimes(stop, formatMinutes(earliest), formatMinutes(earliest + resolveStayMinutes(stop)), resolveStayMinutes(stop)));
-                    dayChanged = true;
-                    changed = true;
-                    continue;
-                }
-                if (repairLateMealByAdjustingPreviousStop(updatedStops, i, latest, minNonMealStops)) {
-                    dayChanged = true;
-                    changed = true;
-                }
-            }
-            updatedDays.add(dayChanged
-                    ? new DayPlan(day.dayIndex(), day.hotel(), updatedStops, day.theme(), day.morningNote(), day.afternoonNote(), day.eveningNote(), day.note())
-                    : day);
-        }
-        if (!changed) {
-            return draft;
-        }
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
-    }
-
-    private boolean repairLateMealByAdjustingPreviousStop(List<Place> stops, int mealIndex, int latestMealStart, int minNonMealStops) {
-        if (stops == null || mealIndex <= 0 || mealIndex >= stops.size()) {
-            return false;
-        }
-        Place previous = stops.get(mealIndex - 1);
-        if (previous == null || isFoodStop(previous)) {
-            return false;
-        }
-        int previousStart = parseTimeMinutes(previous.startTime());
-        int previousEnd = parseTimeMinutes(previous.endTime());
-        int targetPreviousEnd = latestMealStart - transitionMinutes(false);
-        int minPreviousStay = Math.min(45, Math.max(30, resolveStayMinutes(previous) / 2));
-        if (previousStart >= 0 && previousEnd > previousStart && targetPreviousEnd >= previousStart + minPreviousStay && targetPreviousEnd < previousEnd) {
-            stops.set(mealIndex - 1, copyPlaceWithTimes(previous, formatMinutes(previousStart), formatMinutes(targetPreviousEnd), targetPreviousEnd - previousStart));
-            return true;
-        }
-        if (canDropDuplicateStopSafely(stops, previous, mealIndex - 1, minNonMealStops)) {
-            stops.remove(mealIndex - 1);
-            return true;
-        }
-        return false;
-    }
-
-    private int mealEarliestStart(Place stop) {
-        if (hasMealSlot(stop, "lunch")) {
-            return LUNCH_EARLIEST_START_MINUTES;
-        }
-        if (hasMealSlot(stop, "dinner")) {
-            return DINNER_EARLIEST_START_MINUTES;
-        }
-        return 0;
-    }
-
-    private int mealLatestStart(List<Place> stops, int index) {
-        Place stop = stops == null || index < 0 || index >= stops.size() ? null : stops.get(index);
-        if (hasMealSlot(stop, "lunch")) {
-            boolean themeParkDay = stops != null && stops.stream().anyMatch(this::isThemeParkLikeStop);
-            return themeParkDay ? THEME_PARK_DAY_LUNCH_LATEST_START_MINUTES : LUNCH_LATEST_START_MINUTES;
-        }
-        if (hasMealSlot(stop, "dinner")) {
-            return hasThemeParkBeforeIndex(stops, index) ? THEME_PARK_DAY_DINNER_LATEST_START_MINUTES : DINNER_LATEST_START_MINUTES;
-        }
-        return Integer.MAX_VALUE;
-    }
-
-    PlanDraftResponse repairSameDayDuplicatePois(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-        int minNonMealStops = minNonMealStopsPerDay(draft.pace());
-        java.util.Set<String> retainedPoiNames = new java.util.LinkedHashSet<>();
-        for (DayPlan day : draft.daysPlan()) {
-            if (day == null || day.stops() == null) {
-                continue;
-            }
-            day.stops().forEach(stop -> registerRetainedPoiName(retainedPoiNames, stop));
-        }
-        List<DayPlan> updatedDays = new ArrayList<>();
-        boolean changed = false;
-        for (DayPlan day : draft.daysPlan()) {
-            if (day == null || day.stops() == null || day.stops().isEmpty()) {
-                updatedDays.add(day);
-                continue;
-            }
-            Map<String, SeenPoiStop> seenStops = new java.util.LinkedHashMap<>();
-            List<Place> updatedStops = new ArrayList<>(day.stops());
-            boolean dayChanged = false;
-            int index = 0;
-            while (index < updatedStops.size()) {
-                Place stop = updatedStops.get(index);
-                List<String> duplicateKeys = crossDayDuplicatePoiKeys(stop);
-                if (duplicateKeys.isEmpty()) {
-                    index++;
-                    continue;
-                }
-                SeenPoiStop firstSeen = findSeenPoi(duplicateKeys, seenStops);
-                if (firstSeen == null) {
-                    registerSeenPoiKeys(duplicateKeys, new SeenPoiStop(day.dayIndex(), index + 1, safeStopName(stop)), seenStops);
-                    index++;
-                    continue;
-                }
-                if (canDropDuplicateStopSafely(updatedStops, stop, index, minNonMealStops)) {
-                    updatedStops.remove(index);
-                    dayChanged = true;
-                    changed = true;
-                    continue;
-                }
-                Place resolvedReplacement = resolveCrossDayDuplicateReplacementStop(
-                        stop,
-                        day.dayIndex(),
-                        index + 1,
-                        retainedPoiNames
-                );
-                updatedStops.set(index, resolvedReplacement);
-                registerSeenPoiKeys(
-                        crossDayDuplicatePoiKeys(resolvedReplacement),
-                        new SeenPoiStop(day.dayIndex(), index + 1, safeStopName(resolvedReplacement)),
-                        seenStops
-                );
-                registerRetainedPoiName(retainedPoiNames, resolvedReplacement);
-                dayChanged = true;
-                changed = true;
-                index++;
-            }
-            if (dayChanged) {
-                updatedDays.add(new DayPlan(
-                        day.dayIndex(),
-                        day.hotel(),
-                        updatedStops,
-                        day.theme(),
-                        day.morningNote(),
-                        day.afternoonNote(),
-                        day.eveningNote(),
-                        day.note()
-                ));
-            } else {
-                updatedDays.add(day);
-            }
-        }
-        if (!changed) {
-            return draft;
-        }
-        return new PlanDraftResponse(
-                draft.city(),
-                draft.country(),
-                draft.days(),
-                draft.currency(),
-                draft.party(),
-                draft.pace(),
-                draft.title(),
-                draft.overview(),
-                updatedDays,
-                draft.copyPolishStatus()
-        );
-    }
-
-    PlanDraftResponse repairCrossDayDuplicatePois(PlanDraftResponse draft) {
-        if (draft == null || draft.daysPlan() == null || draft.daysPlan().isEmpty()) {
-            return draft;
-        }
-        int minNonMealStops = minNonMealStopsPerDay(draft.pace());
-        Map<String, SeenPoiStop> seenStops = new java.util.LinkedHashMap<>();
-        java.util.Set<String> retainedPoiNames = new java.util.LinkedHashSet<>();
-        List<DayPlan> updatedDays = new ArrayList<>();
-        boolean changed = false;
-        for (DayPlan day : draft.daysPlan()) {
-            if (day == null || day.stops() == null || day.stops().isEmpty()) {
-                updatedDays.add(day);
-                continue;
-            }
-            List<Place> updatedStops = new ArrayList<>(day.stops());
-            boolean dayChanged = false;
-            int index = 0;
-            while (index < updatedStops.size()) {
-                Place stop = updatedStops.get(index);
-                List<String> duplicateKeys = crossDayDuplicatePoiKeys(stop);
-                if (duplicateKeys.isEmpty()) {
-                    registerRetainedPoiName(retainedPoiNames, stop);
-                    index++;
-                    continue;
-                }
-                SeenPoiStop firstSeen = findCrossDaySeenPoi(duplicateKeys, day.dayIndex(), seenStops);
-                if (firstSeen == null) {
-                    registerSeenPoiKeys(duplicateKeys, new SeenPoiStop(day.dayIndex(), index + 1, safeStopName(stop)), seenStops);
-                    registerRetainedPoiName(retainedPoiNames, stop);
-                    index++;
-                    continue;
-                }
-                if (canDropDuplicateStopSafely(updatedStops, stop, index, minNonMealStops)) {
-                    updatedStops.remove(index);
-                    dayChanged = true;
-                    changed = true;
-                    continue;
-                }
-                Place resolvedReplacement = resolveCrossDayDuplicateReplacementStop(
-                        stop,
-                        day.dayIndex(),
-                        index + 1,
-                        retainedPoiNames
-                );
-                updatedStops.set(index, resolvedReplacement);
-                registerSeenPoiKeys(
-                        crossDayDuplicatePoiKeys(resolvedReplacement),
-                        new SeenPoiStop(day.dayIndex(), index + 1, safeStopName(resolvedReplacement)),
-                        seenStops
-                );
-                registerRetainedPoiName(retainedPoiNames, resolvedReplacement);
-                dayChanged = true;
-                changed = true;
-                index++;
-            }
-            if (dayChanged) {
-                updatedDays.add(new DayPlan(
-                        day.dayIndex(),
-                        day.hotel(),
-                        updatedStops,
-                        day.theme(),
-                        day.morningNote(),
-                        day.afternoonNote(),
-                        day.eveningNote(),
-                        day.note()
-                ));
-            } else {
-                updatedDays.add(day);
-            }
-        }
-        if (!changed) {
-            return draft;
-        }
-        return planResponseAssembler.withDays(draft, updatedDays);
-    }
-
-    private Place resolveCrossDayDuplicateReplacementStop(
-            Place stop,
-            int dayIndex,
-            int stopIndex,
-            java.util.Set<String> retainedPoiNames
-    ) {
-        Place realCandidate = tryResolveRealAreaLevelDuplicateReplacement(stop, retainedPoiNames);
-        if (realCandidate != null) {
-            registerRetainedPoiName(retainedPoiNames, realCandidate);
-            return realCandidate;
-        }
-        return buildCrossDayDuplicateFallbackStop(stop, dayIndex, stopIndex, retainedPoiNames);
-    }
-
-    private Place tryResolveRealAreaLevelDuplicateReplacement(Place stop, java.util.Set<String> retainedPoiNames) {
-        if (stop == null || stop.city() == null || stop.city().isBlank()) {
-            return null;
-        }
-        for (String query : crossDayDuplicateReplacementQueries(stop)) {
-            List<GooglePlacesClient.PlaceCandidate> candidates;
-            try {
-                candidates = googlePlacesClient.searchText(query, stop.city());
-            } catch (Exception e) {
-                log.debug("Duplicate replacement candidate search skipped query={} city={}", query, stop.city(), e);
-                continue;
-            }
-            GooglePlacesClient.PlaceCandidate best = candidates.stream()
-                    .filter(candidate -> isUsableCrossDayDuplicateCandidate(stop, candidate, retainedPoiNames))
-                    .max(java.util.Comparator.comparingInt(candidate -> scoreCrossDayDuplicateCandidate(stop, candidate)))
-                    .orElse(null);
-            if (best != null) {
-                return copyCrossDayDuplicateWithCandidate(stop, best);
-            }
-        }
-        return null;
-    }
-
-    private List<String> crossDayDuplicateReplacementQueries(Place stop) {
-        List<String> queries = new ArrayList<>();
-        if (stop == null) {
-            return queries;
-        }
-        String area = displayArea(stop);
-        String category = normalizeSlot(stop.category());
-        switch (category) {
-            case "museum", "gallery", "cultural" -> {
-                addUnique(queries, "museum near " + area);
-                addUnique(queries, "art gallery near " + area);
-            }
-            case "park", "nature", "outdoor" -> {
-                addUnique(queries, "park near " + area);
-                addUnique(queries, "botanic garden near " + area);
-            }
-            case "lookout", "viewpoint", "landmark" -> {
-                addUnique(queries, "landmark near " + area);
-                addUnique(queries, "lookout near " + area);
-            }
-            case "market", "shop", "shopping" -> {
-                addUnique(queries, "market near " + area);
-                addUnique(queries, "cultural centre near " + area);
-            }
-            default -> {
-                addUnique(queries, "tourist attraction near " + area);
-                addUnique(queries, "landmark near " + area);
-            }
-        }
-        addUnique(queries, "tourist attraction near " + area);
-        return queries;
-    }
-
-    private boolean isUsableCrossDayDuplicateCandidate(
-            Place originalStop,
-            GooglePlacesClient.PlaceCandidate candidate,
-            java.util.Set<String> retainedPoiNames
-    ) {
-        if (candidate == null || candidate.name() == null || candidate.name().isBlank()) {
-            return false;
-        }
-        String businessStatus = normalizeSlot(candidate.businessStatus());
-        if (!businessStatus.isBlank() && !"operational".equals(businessStatus)) {
-            return false;
-        }
-        String candidateNameKey = normalizedPoiIdentity(candidate.name());
-        if (candidateNameKey.isBlank()) {
-            return false;
-        }
-        if (candidateNameKey.equals(normalizedPoiIdentity(originalStop.name()))) {
-            return false;
-        }
-        boolean clashesWithRetained = retainedPoiNames.stream()
-                .map(this::normalizedPoiIdentity)
-                .anyMatch(existing -> existing.equals(candidateNameKey));
-        if (clashesWithRetained) {
-            return false;
-        }
-        String types = candidate.types() == null ? "" : String.join(" ", candidate.types()).toLowerCase(Locale.ROOT);
-        if (types.contains("restaurant")
-                || types.contains("food")
-                || types.contains("cafe")
-                || types.contains("lodging")
-                || types.contains("hotel")
-                || types.contains("shopping_mall")
-                || types.contains("store")
-                || types.contains("supermarket")
-                || types.contains("transit_station")
-                || types.contains("bus_station")
-                || types.contains("train_station")) {
-            return false;
-        }
-        return types.contains("museum")
-                || types.contains("art_gallery")
-                || types.contains("park")
-                || types.contains("tourist_attraction")
-                || types.contains("point_of_interest")
-                || types.contains("landmark")
-                || types.contains("cultural")
-                || types.contains("botanical_garden");
-    }
-
-    private int scoreCrossDayDuplicateCandidate(Place originalStop, GooglePlacesClient.PlaceCandidate candidate) {
-        String originalCategory = normalizeSlot(originalStop.category());
-        String candidateTypes = candidate.types() == null ? "" : String.join(" ", candidate.types()).toLowerCase(Locale.ROOT);
-        String candidateText = placeHeuristicService.normalizeSearchText(
-                candidate.name() + " " + candidate.formattedAddress() + " " + candidateTypes
-        );
-        int score = placeHeuristicService.commonSignificantTokenCount(displayArea(originalStop), candidateText) * 20;
-        if ("museum".equals(originalCategory) || "gallery".equals(originalCategory) || "cultural".equals(originalCategory)) {
-            if (candidateTypes.contains("museum") || candidateTypes.contains("art_gallery")) score += 120;
-        } else if ("park".equals(originalCategory) || "nature".equals(originalCategory) || "outdoor".equals(originalCategory)) {
-            if (candidateTypes.contains("park") || candidateTypes.contains("botanical_garden")) score += 120;
-        } else if ("lookout".equals(originalCategory) || "viewpoint".equals(originalCategory) || "landmark".equals(originalCategory)) {
-            if (candidateTypes.contains("landmark") || candidateTypes.contains("tourist_attraction")) score += 100;
-        } else {
-            if (candidateTypes.contains("tourist_attraction") || candidateTypes.contains("point_of_interest")) score += 80;
-        }
-        if (candidateTypes.contains("point_of_interest")) score += 20;
-        if (candidate.googleMapsUri() != null && !candidate.googleMapsUri().isBlank()) score += 10;
-        return score;
-    }
-
-    private Place copyCrossDayDuplicateWithCandidate(Place stop, GooglePlacesClient.PlaceCandidate candidate) {
-        String addressLine = candidate.formattedAddress() == null || candidate.formattedAddress().isBlank()
-                ? stop.addressLine()
-                : candidate.formattedAddress();
-        ParsedAddress parsedAddress = parseAustralianAddress(candidate.formattedAddress(), stop);
-        String suburb = parsedAddress.suburb().isBlank() ? stop.suburb() : parsedAddress.suburb();
-        String state = parsedAddress.state().isBlank() ? stop.state() : parsedAddress.state();
-        String postcode = parsedAddress.postcode().isBlank() ? stop.postcode() : parsedAddress.postcode();
-        String country = parsedAddress.country().isBlank() ? stop.country() : parsedAddress.country();
-        String normalizedAddressLine = parsedAddress.addressLine().isBlank() ? addressLine : parsedAddress.addressLine();
-        String preferredArea = suburb == null || suburb.isBlank() ? stop.preferredArea() : suburb;
-        String resolvedCategory = normalizeCrossDayDuplicateCandidateCategory(stop, candidate);
-        String reason = candidate.name() + " keeps this " + normalizeSlot(stop.timeSlot()) + " block grounded around " + displayArea(stop) + " without repeating a previously used sight.";
-        String tip = "Trim this stop first if transfers start compressing the rest of the day.";
-        String url = candidate.googleMapsUri() == null || candidate.googleMapsUri().isBlank()
-                ? stop.url()
-                : candidate.googleMapsUri();
-        return new Place(
-                candidate.name(),
-                normalizedAddressLine,
-                suburb,
-                stop.city(),
-                state,
-                postcode,
-                country,
-                resolvedCategory,
-                stop.stayMinutes(),
-                stop.timeSlot(),
-                stop.startTime(),
-                stop.endTime(),
-                stop.mealType(),
-                preferredArea,
-                stop.cuisine(),
-                stop.vibe(),
-                stop.budgetLevel(),
-                reason,
-                tip,
-                candidate.websiteUri(),
-                candidate.googleMapsUri(),
-                candidate.businessStatus(),
-                url,
-                Double.isNaN(candidate.lat()) ? stop.latitude() : candidate.lat(),
-                Double.isNaN(candidate.lng()) ? stop.longitude() : candidate.lng()
-        );
-    }
-
-    private String normalizeCrossDayDuplicateCandidateCategory(Place originalStop, GooglePlacesClient.PlaceCandidate candidate) {
-        String types = candidate.types() == null ? "" : String.join(" ", candidate.types()).toLowerCase(Locale.ROOT);
-        if (types.contains("museum") || types.contains("art_gallery")) {
-            return "museum";
-        }
-        if (types.contains("park") || types.contains("botanical_garden")) {
-            return "park";
-        }
-        if (types.contains("landmark") || types.contains("tourist_attraction")) {
-            return "attraction";
-        }
-        return normalizeSlot(originalStop.category()).isBlank() ? "attraction" : originalStop.category();
-    }
-
-    private Place buildCrossDayDuplicateFallbackStop(Place stop, int dayIndex, int stopIndex, java.util.Set<String> retainedPoiNames) {
-        if (stop == null) {
-            return null;
-        }
-        String area = displayArea(stop);
-        String slot = normalizeSlot(stop.timeSlot());
-        String theme = switch (normalizeSlot(stop.category())) {
-            case "museum", "gallery", "cultural" -> "Heritage Stroll";
-            case "park", "nature" -> "Garden Stroll";
-            case "lookout", "viewpoint", "landmark" -> "Scenic Stroll";
-            case "shop", "market" -> "Local Stroll";
-            default -> "Neighborhood Stroll";
-        };
-        String slotLabel = switch (slot) {
-            case "morning" -> "Morning ";
-            case "afternoon" -> "Afternoon ";
-            case "sunset" -> "Sunset ";
-            case "evening", "dinner" -> "Evening ";
-            default -> "";
-        };
-        String uniqueName = (area + " " + slotLabel + theme).replaceAll("\\s+", " ").trim();
-        uniqueName = ensureUniqueFallbackPoiName(uniqueName, stop, retainedPoiNames, dayIndex, stopIndex);
-        return new Place(
-                uniqueName,
-                stop.addressLine(),
-                stop.suburb(),
-                stop.city(),
-                stop.state(),
-                stop.postcode(),
-                stop.country(),
-                "walk",
-                stop.stayMinutes(),
-                stop.timeSlot(),
-                stop.startTime(),
-                stop.endTime(),
-                stop.mealType(),
-                stop.preferredArea(),
-                stop.cuisine(),
-                stop.vibe(),
-                stop.budgetLevel(),
-                "Flexible nearby filler after duplicate removal.",
-                "Trim this block first if timing gets tight.",
-                null,
-                null,
-                null,
-                null,
-                stop.latitude(),
-                stop.longitude()
-        );
-    }
-
-    private void registerRetainedPoiName(java.util.Set<String> retainedPoiNames, Place stop) {
-        if (retainedPoiNames == null || stop == null || stop.name() == null || stop.name().isBlank()) {
-            return;
-        }
-        String normalized = normalizedPoiIdentity(stop.name());
-        if (!normalized.isBlank()) {
-            retainedPoiNames.add(normalized);
-        }
-    }
-
-    private String ensureUniqueFallbackPoiName(String candidate, Place originalStop, java.util.Set<String> retainedPoiNames, int dayIndex, int stopIndex) {
-        String uniqueName = candidate == null ? "" : candidate.trim();
-        String normalizedCandidate = normalizedPoiIdentity(uniqueName);
-        String normalizedOriginal = originalStop == null ? "" : normalizedPoiIdentity(originalStop.name());
-        int suffix = 2;
-        while (!normalizedCandidate.isBlank() && (retainedPoiNames.contains(normalizedCandidate) || normalizedCandidate.equals(normalizedOriginal))) {
-            uniqueName = candidate.trim() + " Alt " + suffix;
-            normalizedCandidate = normalizedPoiIdentity(uniqueName);
-            suffix++;
-        }
-        if (!normalizedCandidate.isBlank()) {
-            retainedPoiNames.add(normalizedCandidate);
-        }
-        return uniqueName;
-    }
-
-    private boolean canDropDuplicateStopSafely(List<Place> stops, Place stop, int stopIndex, int minNonMealStops) {
-        if (wouldDropBelowMinNonMealStops(stops, stop, minNonMealStops)) {
-            return false;
-        }
-        return !isOnlyNonMealStopInDayPhase(stops, stop, stopIndex);
-    }
-
-    private boolean isOnlyNonMealStopInDayPhase(List<Place> stops, Place target, int targetIndex) {
-        if (stops == null || stops.isEmpty() || target == null || isFoodStop(target)) {
-            return false;
-        }
-        String phase = broadNonMealPhase(target);
-        if (phase.isBlank()) {
-            return false;
-        }
-        int samePhaseCount = 0;
-        for (int i = 0; i < stops.size(); i++) {
-            Place candidate = stops.get(i);
-            if (isFoodStop(candidate) || !phase.equals(broadNonMealPhase(candidate))) {
-                continue;
-            }
-            samePhaseCount++;
-            if (samePhaseCount > 1) {
-                return false;
-            }
-        }
-        return samePhaseCount == 1;
-    }
-
-    private String broadNonMealPhase(Place stop) {
-        String slot = normalizeSlot(stop == null ? null : stop.timeSlot());
-        return switch (slot) {
-            case "morning" -> "morning";
-            case "afternoon", "sunset" -> "afternoon";
-            case "evening", "night" -> "evening";
-            default -> "";
-        };
+        return mealTimeWindowRepairService.repairResponse(draft);
     }
 
     private String normalizedPoiIdentity(String value) {
@@ -6539,32 +2888,93 @@ public class PlanProcessorService {
     }
 
     private boolean shouldExtendThemeParkContinuationBeforeDinner(Place previous, Place current, int previousEnd, int currentStart) {
-        if (!isThemeParkContinuationStop(previous) || !hasMealSlot(current, "dinner")) {
-            return false;
-        }
-        if (previousEnd < 0 || currentStart < 0) {
-            return false;
-        }
-        return currentStart - previousEnd > THEME_PARK_CONTINUATION_TO_DINNER_TARGET_GAP_MINUTES;
+        return themeParkGovernanceService.shouldExtendContinuationBeforeDinner(previous, current, previousEnd, currentStart);
     }
 
     private Place extendThemeParkContinuationBeforeDinner(Place previous, int dinnerStart) {
-        int previousStart = parseTimeMinutes(previous.startTime());
-        int previousEnd = parseTimeMinutes(previous.endTime());
-        if (previousStart < 0 || previousEnd < 0 || dinnerStart < 0) {
-            return previous;
+        return themeParkGovernanceService.extendContinuationBeforeDinner(previous, dinnerStart);
+    }
+
+    List<String> validateDraft(PlanDraftResponse draft) {
+        return planQualityService.validate(PlanDraft.fromResponse(draft));
+    }
+
+    List<String> validateDraft(PlanDraftResponse draft, CreatePlanReq req) {
+        return planQualityService.validate(PlanDraft.fromResponse(draft), req);
+    }
+
+    private List<String> validateDraft(PlanDraftResponse draft, CreatePlanReq req, DaySkeletonContext skeletonContext) {
+        Map<Integer, Integer> effectiveMinByDay = null;
+        if (skeletonContext != null && draft != null) {
+            effectiveMinByDay = skeletonContext.effectiveMinByDay(minNonMealStopsPerDay(draft.pace()));
         }
-        int currentStay = Math.max(resolveStayMinutes(previous), previousEnd - previousStart);
-        int targetStay = Math.min(
-                THEME_PARK_CONTINUATION_MAX_EXTENSION_MINUTES,
-                Math.max(currentStay, dinnerStart - THEME_PARK_CONTINUATION_TO_DINNER_TARGET_GAP_MINUTES - previousStart)
-        );
-        int latestEndBeforeDinner = dinnerStart - transitionMinutes(false);
-        int targetEnd = Math.min(previousStart + targetStay, latestEndBeforeDinner);
-        if (targetEnd <= previousEnd) {
-            return previous;
+        return planQualityService.validate(PlanDraft.fromResponse(draft), req, effectiveMinByDay);
+    }
+
+    private java.util.Set<Integer> detectChangedDayIndexes(PlanDraftResponse before, PlanDraftResponse after) {
+        java.util.Set<Integer> changed = new java.util.LinkedHashSet<>();
+        Map<Integer, DayPlan> beforeByDay = before == null || before.daysPlan() == null
+                ? Map.of()
+                : before.daysPlan().stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(DayPlan::dayIndex, day -> day, (left, right) -> left, java.util.LinkedHashMap::new));
+        if (after == null || after.daysPlan() == null) {
+            return changed;
         }
-        return copyPlaceWithTimes(previous, formatMinutes(previousStart), formatMinutes(targetEnd), targetEnd - previousStart);
+        for (DayPlan afterDay : after.daysPlan()) {
+            if (afterDay == null) {
+                continue;
+            }
+            DayPlan beforeDay = beforeByDay.get(afterDay.dayIndex());
+            if (!Objects.equals(daySignature(beforeDay), daySignature(afterDay))) {
+                changed.add(afterDay.dayIndex());
+            }
+        }
+        return changed;
+    }
+
+    private String daySignature(DayPlan day) {
+        if (day == null || day.stops() == null) {
+            return "";
+        }
+        return day.stops().stream()
+                .map(stop -> joinText(
+                        stop == null ? null : stop.name(),
+                        stop == null ? null : stop.startTime(),
+                        stop == null ? null : stop.endTime(),
+                        stop == null ? null : stop.mealType(),
+                        stop == null ? null : stop.timeSlot()
+                ))
+                .collect(Collectors.joining("|"));
+    }
+
+    private int minNonMealStopsPerDay(String pace) {
+        return daySkeletonService.nonMealRangeForPace(pace).min();
+    }
+
+    private boolean hasThemeParkBeforeIndex(List<Place> stops, int index) {
+        if (stops == null || index <= 0) {
+            return false;
+        }
+        for (int i = 0; i < Math.min(index, stops.size()); i++) {
+            if (isThemeParkLikeStop(stops.get(i))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private RouteRecommendationContext routeSchedulingContext(PlanDraftResponse draft) {
+        int kids = draft == null || draft.party() == null || draft.party().kids() == null ? 0 : draft.party().kids();
+        return new RouteRecommendationContext(kids > 0, null, null);
+    }
+
+    private DayPlan normalizeDayScheduleWithRouteDurations(DayPlan day, RouteRecommendationContext ctx) {
+        return normalizeDaySchedule(day);
+    }
+
+    PlanDraftResponse repairCrossDayDuplicatePois(PlanDraftResponse draft) {
+        return duplicatePoiRepairService.repairCrossDayDuplicatePois(draft);
     }
 
     private int earliestAllowedStartForGapClamp(Place stop) {
@@ -6576,54 +2986,6 @@ public class PlanProcessorService {
             return DINNER_EARLIEST_START_MINUTES;
         }
         return timeSensitiveEarliestStart(stop);
-    }
-
-    private PlanDraftResponse rewriteDayNarratives(PlanDraftResponse draft) {
-        return rewriteDayNarratives(draft, null);
-    }
-
-    private PlanDraftResponse rewriteDayNarratives(PlanDraftResponse draft, java.util.Set<Integer> targetDayIndexes) {
-        if (draft == null || draft.daysPlan() == null) return draft;
-        List<DayPlan> days = draft.daysPlan().stream().map(day -> {
-            if (day == null) {
-                return null;
-            }
-            if (targetDayIndexes != null && !targetDayIndexes.isEmpty() && !targetDayIndexes.contains(day.dayIndex())) {
-                return day;
-            }
-            List<Place> stops = day.stops() == null ? List.of() : day.stops().stream().map(this::normalizeNarrative).toList();
-            boolean themeParkDay = stops.stream().anyMatch(this::isThemeParkLikeStop);
-            String morningNote = themeParkDay ? sanitizeThemeParkCopy(day.morningNote()) : day.morningNote();
-            String afternoonNote = themeParkDay ? sanitizeThemeParkCopy(day.afternoonNote()) : day.afternoonNote();
-            String eveningNote = themeParkDay ? sanitizeThemeParkCopy(day.eveningNote()) : day.eveningNote();
-            String note = themeParkDay ? sanitizeThemeParkCopy(day.note()) : day.note();
-            return new DayPlan(day.dayIndex(), day.hotel(), stops, day.theme(), morningNote, afternoonNote, eveningNote, note);
-        }).toList();
-        return planResponseAssembler.withDays(draft, days);
-    }
-
-    private Place normalizeNarrative(Place stop) {
-        if (stop == null || isMealCategory(normalizeSlot(stop.category()))) {
-            return stop;
-        }
-        String category = normalizeSlot(stop.category());
-        String reason = stop.reason();
-        String tip = stop.tip();
-        String area = displayArea(stop);
-        if (isThemeParkLikeStop(stop)) {
-            reason = sanitizeThemeParkCopy(reason);
-            tip = sanitizeThemeParkCopy(tip);
-        } else if ("museum".equals(category)) {
-            reason = stop.name() + " works as the day's main cultural block around " + area + ", giving the route substance before the lighter stops.";
-            tip = "Check current exhibitions and ticket details before you set out.";
-        } else if (isParkLikeStop(stop)) {
-            reason = stop.name() + " gives the route an outdoor reset around " + area + " without adding another heavy indoor stop.";
-            tip = "Keep this flexible for weather and energy, and shorten it if the day starts running late.";
-        } else if ("attraction".equals(category)) {
-            reason = stop.name() + " adds a compact sightseeing stop around " + area + " without making the day too dense.";
-            tip = "Confirm current access details before visiting if it depends on scheduled entry or events.";
-        }
-        return copyPlaceWithNarrative(stop, reason, tip);
     }
 
     private String displayArea(Place stop) {
@@ -6640,36 +3002,6 @@ public class PlanProcessorService {
             return stop.city().trim();
         }
         return "the area";
-    }
-
-    private Place copyPlaceWithNarrative(Place stop, String reason, String tip) {
-        return new Place(
-                stop.name(),
-                stop.addressLine(),
-                stop.suburb(),
-                stop.city(),
-                stop.state(),
-                stop.postcode(),
-                stop.country(),
-                stop.category(),
-                stop.stayMinutes(),
-                stop.timeSlot(),
-                stop.startTime(),
-                stop.endTime(),
-                stop.mealType(),
-                stop.preferredArea(),
-                stop.cuisine(),
-                stop.vibe(),
-                stop.budgetLevel(),
-                reason,
-                tip,
-                stop.websiteUri(),
-                stop.googleMapsUri(),
-                stop.businessStatus(),
-                stop.url(),
-                stop.latitude(),
-                stop.longitude()
-        );
     }
 
     // Utility methods
@@ -6829,17 +3161,6 @@ public class PlanProcessorService {
                 || name.contains("walking path"));
     }
 
-    private Integer parseInteger(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            return (int) Math.round(Double.parseDouble(value.trim()));
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
     private void addUnique(List<String> values, String value) {
         if (value == null || value.isBlank()) {
             return;
@@ -6929,14 +3250,9 @@ public class PlanProcessorService {
         return cleaned.substring(0, 33) + "...";
     }
 
-    private interface RouteSummarySupplier {
-        MapService.RouteSummary get();
-    }
-
     private record PaceNonMealRange(int min, int max) {}
     private record StopLocation(double lat, double lon, String addressLine) {}
     private record ParsedAddress(String addressLine, String suburb, String state, String postcode, String country) {}
-    private record RankedPlaceCoordinate(GooglePlacesClient.PlaceCandidate candidate, int score) {}
     private record SeenPoiStop(int dayIndex, int stopIndex, String stopName) {}
     private record DaySkeletonContext(
             Map<Integer, Integer> effectiveMinByDay,
