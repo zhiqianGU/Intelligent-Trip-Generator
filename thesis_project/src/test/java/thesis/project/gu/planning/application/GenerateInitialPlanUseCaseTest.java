@@ -1,7 +1,10 @@
 package thesis.project.gu.planning.application;
 
 import org.junit.jupiter.api.Test;
+import thesis.project.gu.exception.NavigatorException;
 import thesis.project.gu.catalog.application.DestinationCatalog;
+import thesis.project.gu.catalog.application.CoverageGapResolutionService;
+import thesis.project.gu.catalog.application.CoverageInventoryBuilder;
 import thesis.project.gu.catalog.application.PlanningZoneRetrievalService;
 import thesis.project.gu.catalog.domain.CoverageResult;
 import thesis.project.gu.catalog.domain.Destination;
@@ -23,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class GenerateInitialPlanUseCaseTest {
     @Test
@@ -44,6 +48,8 @@ class GenerateInitialPlanUseCaseTest {
                 new ZoneContextBuilder(),
                 new LocalFallbackPlanningAgent(),
                 new PlanningSpecificationValidator(),
+                new CoverageInventoryBuilder(),
+                new CoverageGapResolutionService(new CoverageInventoryBuilder()),
                 catalog,
                 generator,
                 passingQualityService(),
@@ -95,6 +101,8 @@ class GenerateInitialPlanUseCaseTest {
                 new ZoneContextBuilder(),
                 failingAgent,
                 new PlanningSpecificationValidator(),
+                new CoverageInventoryBuilder(),
+                new CoverageGapResolutionService(new CoverageInventoryBuilder()),
                 catalog,
                 generator,
                 passingQualityService(),
@@ -139,6 +147,8 @@ class GenerateInitialPlanUseCaseTest {
                 new ZoneContextBuilder(),
                 input -> null,
                 new PlanningSpecificationValidator(),
+                new CoverageInventoryBuilder(),
+                new CoverageGapResolutionService(new CoverageInventoryBuilder()),
                 catalog,
                 generator,
                 passingQualityService(),
@@ -168,6 +178,49 @@ class GenerateInitialPlanUseCaseTest {
                 .containsExactly("brisbane-south-bank");
     }
 
+    @Test
+    void unresolvedHardGapDoesNotEnterNormalGenerationPath() {
+        PlanningZoneSummary southBank = zone("brisbane-south-bank", "South Bank");
+        HardGapDestinationCatalog catalog = new HardGapDestinationCatalog(List.of(southBank));
+        CapturingItineraryGenerator generator = new CapturingItineraryGenerator();
+        GenerateInitialPlanUseCase useCase = new GenerateInitialPlanUseCase(
+                new PlanRequestContextBuilder(new PlanRequestNormalizer(), new PlanGenerationModeResolver()),
+                new LightweightRequestPreParser(),
+                new RetrievalQueryBuilder(),
+                destinationCandidate -> new Destination("AU-QLD-BRISBANE", "Brisbane", "Queensland", "Australia", "Australia/Brisbane", true),
+                (query, availableZones) -> new PlanningZoneRetrievalResult(List.of(), List.of()),
+                new ZoneContextBuilder(),
+                new LocalFallbackPlanningAgent(),
+                new PlanningSpecificationValidator(),
+                new CoverageInventoryBuilder(),
+                new CoverageGapResolutionService(new CoverageInventoryBuilder()),
+                catalog,
+                generator,
+                passingQualityService(),
+                null,
+                null,
+                null
+        );
+
+        assertThatThrownBy(() -> useCase.execute(
+                new CreatePlanReq(
+                        "Brisbane",
+                        1,
+                        1200,
+                        new CreatePlanReq.Party(2, 0),
+                        List.of("culture"),
+                        "normal",
+                        "local-fast",
+                        null
+                ),
+                false,
+                false,
+                new NoopOperations()
+        )).isInstanceOf(NavigatorException.class);
+
+        assertThat(generator.receivedSkeleton).isNull();
+    }
+
     private static PlanQualityService passingQualityService() {
         return draft -> new LocalPlanQualityReport(100, 0, 0, List.of());
     }
@@ -189,7 +242,7 @@ class GenerateInitialPlanUseCaseTest {
         private List<PlanningZoneSummary> orderedZonesPassedToSkeleton = List.of();
         private TripPlanningSpecification specificationPassedToSkeleton;
 
-        private CapturingDestinationCatalog(List<PlanningZoneSummary> availableZones) {
+        protected CapturingDestinationCatalog(List<PlanningZoneSummary> availableZones) {
             this.availableZones = availableZones;
         }
 
@@ -229,6 +282,59 @@ class GenerateInitialPlanUseCaseTest {
         @Override
         public PlaceCandidatePool buildCandidatePool(TripPlanningSpecification specification) {
             return PlaceCandidatePool.empty("Brisbane");
+        }
+    }
+
+    private static class HardGapDestinationCatalog extends CapturingDestinationCatalog {
+        private HardGapDestinationCatalog(List<PlanningZoneSummary> availableZones) {
+            super(availableZones);
+        }
+
+        @Override
+        public CoverageResult checkCoverage(
+                TripPlanningSpecification specification,
+                TripSkeleton skeleton,
+                PlaceCandidatePool candidatePool
+        ) {
+            return hardGap();
+        }
+
+        @Override
+        public CoverageResult checkCoverage(
+                TripPlanningSpecification specification,
+                TripSkeleton skeleton,
+                PlaceCandidatePool candidatePool,
+                List<thesis.project.gu.catalog.domain.AvailableZoneSummary> availableZoneSummaries
+        ) {
+            return hardGap();
+        }
+
+        @Override
+        public CoverageResult checkCoverage(
+                TripPlanningSpecification specification,
+                TripSkeleton skeleton,
+                PlaceCandidatePool candidatePool,
+                List<thesis.project.gu.catalog.domain.AvailableZoneSummary> availableZoneSummaries,
+                List<PlanningZoneSummary> planningZones
+        ) {
+            return hardGap();
+        }
+
+        private CoverageResult hardGap() {
+            return new CoverageResult(
+                    false,
+                    false,
+                    List.of(new thesis.project.gu.catalog.domain.CoverageGap(
+                            1,
+                            "brisbane-south-bank",
+                            "DINNER",
+                            List.of(),
+                            1,
+                            2,
+                            0
+                    )),
+                    List.of()
+            );
         }
     }
 

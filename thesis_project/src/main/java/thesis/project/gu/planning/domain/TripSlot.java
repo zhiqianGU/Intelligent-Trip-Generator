@@ -13,7 +13,8 @@ public record TripSlot(
     public enum SlotType {
         ACTIVITY,
         LUNCH,
-        DINNER
+        DINNER,
+        SPECIAL_EVENT
     }
 
     public record TimeWindow(String start, String end) {

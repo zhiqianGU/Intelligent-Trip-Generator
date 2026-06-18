@@ -2,11 +2,15 @@ package thesis.project.gu.catalog.local;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import thesis.project.gu.catalog.application.DestinationCatalog;
+import thesis.project.gu.catalog.application.CoverageInventoryBuilder;
 import thesis.project.gu.catalog.domain.AvailableZoneSummary;
+import thesis.project.gu.catalog.domain.CatalogInventory;
 import thesis.project.gu.catalog.domain.CoverageGap;
+import thesis.project.gu.catalog.domain.CoverageInventory;
 import thesis.project.gu.catalog.domain.CoverageResult;
 import thesis.project.gu.catalog.domain.PlanningZoneSnapshot;
 import thesis.project.gu.catalog.domain.PlanningZoneSummary;
@@ -35,10 +39,19 @@ public class LocalPoiCatalogService implements DestinationCatalog {
     private static final String LOCAL_FRESHNESS_STATUS = "LOCAL_CURATED";
 
     private final ObjectMapper objectMapper;
+    private final CoverageInventoryBuilder coverageInventoryBuilder;
     private final Map<String, LocalPoiCatalog> catalogCache = new ConcurrentHashMap<>();
 
     public LocalPoiCatalogService(ObjectMapper objectMapper) {
+        this(objectMapper, new CoverageInventoryBuilder());
+    }
+
+    @Autowired
+    public LocalPoiCatalogService(ObjectMapper objectMapper, CoverageInventoryBuilder coverageInventoryBuilder) {
         this.objectMapper = objectMapper;
+        this.coverageInventoryBuilder = coverageInventoryBuilder == null
+                ? new CoverageInventoryBuilder()
+                : coverageInventoryBuilder;
     }
 
     public LocalPoiCatalog catalogForCity(String city) {
@@ -108,7 +121,6 @@ public class LocalPoiCatalogService implements DestinationCatalog {
         String startTime = specification == null || specification.constraints() == null
                 ? "09:00"
                 : specification.constraints().preferredStartTime();
-        int activitySlots = activitySlotsPerDay(specification);
         List<TripPlanningSpecification.DayStrategy> strategies = specification == null || specification.dayStrategies() == null
                 ? List.of()
                 : specification.dayStrategies();
@@ -121,14 +133,16 @@ public class LocalPoiCatalogService implements DestinationCatalog {
             String zoneId = strategy == null ? zoneIdForDay(zones, day) : strategy.primaryZoneId();
             String theme = strategy == null ? "Day " + day + " local highlights" : strategy.theme();
             List<TripSlot> slots = new ArrayList<>();
+            int activitySlots = activitySlotsForDay(specification, strategy);
+            List<String> activityCapabilities = activityRequiredCapabilities(strategy);
             for (int index = 1; index <= activitySlots; index++) {
                 slots.add(new TripSlot(
                         "day" + day + "-activity-" + index,
                         TripSlot.SlotType.ACTIVITY,
                         zoneId,
-                        strategy == null || strategy.requiredCapabilities() == null ? List.of() : strategy.requiredCapabilities(),
-                        90,
-                        null
+                        activityCapabilities,
+                        activityDurationMinutes(strategy),
+                        activityTimeWindow(index, startTime)
                 ));
             }
             slots.add(new TripSlot(
@@ -139,15 +153,26 @@ public class LocalPoiCatalogService implements DestinationCatalog {
                     60,
                     new TripSlot.TimeWindow("12:00", "14:00")
             ));
+            TripPlanningSpecification.SpecialEvent specialEvent = specialEventForDay(specification, day);
+            if (specialEvent != null) {
+                slots.add(new TripSlot(
+                        "day" + day + "-special-event",
+                        TripSlot.SlotType.SPECIAL_EVENT,
+                        zoneId,
+                        specialEventCapabilities(specialEvent, strategy),
+                        90,
+                        specialEventTimeWindow(specialEvent)
+                ));
+            }
             slots.add(new TripSlot(
                     "day" + day + "-dinner",
                     TripSlot.SlotType.DINNER,
                     zoneId,
-                    birthdayDay(specification, day) ? List.of("birthday-suitable") : List.of(),
+                    specialEvent == null ? List.of() : specialEventCapabilities(specialEvent, strategy),
                     90,
                     new TripSlot.TimeWindow("18:00", "20:30")
             ));
-            daySkeletons.add(new TripSkeleton.DaySkeleton(day, theme, zoneId, startTime, slots));
+            daySkeletons.add(new TripSkeleton.DaySkeleton(day, theme, zoneId, startTime, slots, fallbackZoneIds(strategy)));
         }
         return new TripSkeleton(daySkeletons);
     }
@@ -158,18 +183,61 @@ public class LocalPoiCatalogService implements DestinationCatalog {
             TripSkeleton skeleton,
             PlaceCandidatePool candidatePool
     ) {
+        return checkCoverage(specification, skeleton, candidatePool, List.of());
+    }
+
+    @Override
+    public CoverageResult checkCoverage(
+            TripPlanningSpecification specification,
+            TripSkeleton skeleton,
+            PlaceCandidatePool candidatePool,
+            List<AvailableZoneSummary> availableZoneSummaries
+    ) {
+        return checkCoverage(specification, skeleton, candidatePool, availableZoneSummaries, findAvailableZones(specification));
+    }
+
+    @Override
+    public CoverageResult checkCoverage(
+            TripPlanningSpecification specification,
+            TripSkeleton skeleton,
+            PlaceCandidatePool candidatePool,
+            List<AvailableZoneSummary> availableZoneSummaries,
+            List<PlanningZoneSummary> planningZones
+    ) {
         if (skeleton == null || skeleton.days() == null || skeleton.days().isEmpty()) {
             return CoverageResult.sufficient();
         }
         PlaceCandidatePool pool = candidatePool == null ? buildCandidatePool(specification) : candidatePool;
+        CoverageInventory inventory = coverageInventoryBuilder.build(
+                specification,
+                skeleton,
+                CatalogInventory.fromCandidatePool(pool),
+                availableZoneSummaries == null || availableZoneSummaries.isEmpty()
+                        ? findAvailableZoneSummaries(specification, findAvailableZones(specification))
+                        : availableZoneSummaries,
+                planningZones
+        );
+        return coverageResultFromInventory(inventory);
+    }
+
+    private CoverageResult coverageResultFromInventory(CoverageInventory inventory) {
         List<CoverageGap> hardGaps = new ArrayList<>();
         List<CoverageGap> softGaps = new ArrayList<>();
-        for (TripSkeleton.DaySkeleton day : skeleton.days()) {
-            Map<TripSlot.SlotType, Long> slotCounts = day.slots().stream()
-                    .collect(Collectors.groupingBy(TripSlot::slotType, Collectors.counting()));
-            checkSlotCoverage(day, TripSlot.SlotType.ACTIVITY, slotCounts, candidatesForZone(pool.attractions(), day.zoneId()), hardGaps, softGaps);
-            checkSlotCoverage(day, TripSlot.SlotType.LUNCH, slotCounts, mealCandidatesForZone(pool.restaurants(), day.zoneId(), "lunch"), hardGaps, softGaps);
-            checkSlotCoverage(day, TripSlot.SlotType.DINNER, slotCounts, mealCandidatesForZone(pool.restaurants(), day.zoneId(), "dinner"), hardGaps, softGaps);
+        for (CoverageInventory.Entry entry : inventory.entries()) {
+            CoverageGap gap = new CoverageGap(
+                    entry.day(),
+                    entry.zoneId(),
+                    entry.slotType().name(),
+                    entry.requiredCapabilities(),
+                    entry.requiredUsageCount(),
+                    entry.preferredCandidateCount(),
+                    entry.availableCandidateCount()
+            );
+            if (entry.blocksGeneration() && entry.availableCandidateCount() < entry.requiredUsageCount()) {
+                hardGaps.add(gap);
+            } else if (entry.blocksGeneration() && entry.availableCandidateCount() < entry.preferredCandidateCount()) {
+                softGaps.add(gap);
+            }
         }
         return new CoverageResult(hardGaps.isEmpty(), softGaps.isEmpty(), List.copyOf(hardGaps), List.copyOf(softGaps));
     }
@@ -500,6 +568,110 @@ public class LocalPoiCatalogService implements DestinationCatalog {
         return kids != null && kids > 0 ? Math.max(2, base - 1) : base;
     }
 
+    private int activitySlotsForDay(
+            TripPlanningSpecification specification,
+            TripPlanningSpecification.DayStrategy strategy
+    ) {
+        int base = activitySlotsPerDay(specification);
+        String allocation = normalizeToken(strategy == null ? null : strategy.allocation());
+        return switch (allocation) {
+            case "half-day", "halfday" -> Math.max(1, Math.min(2, base - 1));
+            case "full-or-half-day", "full-half-day" -> Math.max(2, Math.min(base, 3));
+            default -> base;
+        };
+    }
+
+    private List<String> activityRequiredCapabilities(TripPlanningSpecification.DayStrategy strategy) {
+        List<String> capabilities = new ArrayList<>();
+        if (strategy != null && strategy.requiredCapabilities() != null) {
+            capabilities.addAll(strategy.requiredCapabilities());
+        }
+        if (strategy != null && strategy.preferredPoiTypes() != null) {
+            strategy.preferredPoiTypes().stream()
+                    .map(this::normalizeToken)
+                    .filter(value -> !value.isBlank())
+                    .filter(this::isActivitySlotPoiType)
+                    .map(value -> "poi-type:" + value)
+                    .forEach(capabilities::add);
+        }
+        return capabilities.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .distinct()
+                .toList();
+    }
+
+    private boolean isActivitySlotPoiType(String poiType) {
+        return switch (poiType) {
+            case "culture", "museum", "gallery", "art", "nature", "park", "garden", "outdoor",
+                 "shopping", "market", "market-shopping", "theme-park", "themepark", "indoor", "rainy-day" -> true;
+            default -> false;
+        };
+    }
+
+    private int activityDurationMinutes(TripPlanningSpecification.DayStrategy strategy) {
+        String allocation = normalizeToken(strategy == null ? null : strategy.allocation());
+        return switch (allocation) {
+            case "half-day", "halfday" -> 75;
+            default -> 90;
+        };
+    }
+
+    private TripSlot.TimeWindow activityTimeWindow(int index, String startTime) {
+        if (index == 1 && "10:00".equals(startTime)) {
+            return new TripSlot.TimeWindow("10:00", "12:00");
+        }
+        return switch (index) {
+            case 1 -> new TripSlot.TimeWindow("09:00", "11:30");
+            case 2 -> new TripSlot.TimeWindow("14:00", "16:00");
+            case 3 -> new TripSlot.TimeWindow("16:00", "17:30");
+            default -> null;
+        };
+    }
+
+    private TripPlanningSpecification.SpecialEvent specialEventForDay(TripPlanningSpecification specification, int day) {
+        if (specification == null || specification.specialEvents() == null) {
+            return null;
+        }
+        return specification.specialEvents().stream()
+                .filter(event -> event != null && event.day() == day)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<String> specialEventCapabilities(
+            TripPlanningSpecification.SpecialEvent specialEvent,
+            TripPlanningSpecification.DayStrategy strategy
+    ) {
+        List<String> capabilities = new ArrayList<>();
+        if (specialEvent != null && specialEvent.requiredCapabilities() != null) {
+            capabilities.addAll(specialEvent.requiredCapabilities());
+        }
+        if (strategy != null && strategy.requiredCapabilities() != null) {
+            capabilities.addAll(strategy.requiredCapabilities());
+        }
+        return capabilities.stream()
+                .filter(value -> value != null && !value.isBlank())
+                .distinct()
+                .toList();
+    }
+
+    private TripSlot.TimeWindow specialEventTimeWindow(TripPlanningSpecification.SpecialEvent specialEvent) {
+        String type = normalizeToken(specialEvent == null ? null : specialEvent.type());
+        if ("birthday".equals(type)) {
+            return new TripSlot.TimeWindow("17:00", "20:30");
+        }
+        return new TripSlot.TimeWindow("16:00", "19:00");
+    }
+
+    private List<String> fallbackZoneIds(TripPlanningSpecification.DayStrategy strategy) {
+        return strategy == null || strategy.fallbackZoneIds() == null
+                ? List.of()
+                : strategy.fallbackZoneIds().stream()
+                .filter(value -> value != null && !value.isBlank())
+                .distinct()
+                .toList();
+    }
+
     private TripPlanningSpecification.DayStrategy strategyForDay(List<TripPlanningSpecification.DayStrategy> strategies, int day) {
         return strategies.stream()
                 .filter(strategy -> strategy.day() == day)
@@ -518,13 +690,6 @@ public class LocalPoiCatalogService implements DestinationCatalog {
                 .toList();
         List<PlanningZoneSummary> effectiveZones = mealCapableZones.isEmpty() ? zones : mealCapableZones;
         return effectiveZones.get((day - 1) % effectiveZones.size()).zoneId();
-    }
-
-    private boolean birthdayDay(TripPlanningSpecification specification, int day) {
-        return specification != null
-                && specification.specialEvents() != null
-                && specification.specialEvents().stream()
-                .anyMatch(event -> event.day() == day && "BIRTHDAY".equalsIgnoreCase(event.type()));
     }
 
     private boolean sameZone(String area, String zoneId) {

@@ -39,5 +39,24 @@ public interface DestinationCatalog {
             PlaceCandidatePool candidatePool
     );
 
+    default CoverageResult checkCoverage(
+            TripPlanningSpecification specification,
+            TripSkeleton skeleton,
+            PlaceCandidatePool candidatePool,
+            List<AvailableZoneSummary> availableZoneSummaries
+    ) {
+        return checkCoverage(specification, skeleton, candidatePool);
+    }
+
+    default CoverageResult checkCoverage(
+            TripPlanningSpecification specification,
+            TripSkeleton skeleton,
+            PlaceCandidatePool candidatePool,
+            List<AvailableZoneSummary> availableZoneSummaries,
+            List<PlanningZoneSummary> planningZones
+    ) {
+        return checkCoverage(specification, skeleton, candidatePool, availableZoneSummaries);
+    }
+
     PlaceCandidatePool buildCandidatePool(TripPlanningSpecification specification);
 }

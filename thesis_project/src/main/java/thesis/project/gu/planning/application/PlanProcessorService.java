@@ -193,37 +193,17 @@ public class PlanProcessorService {
                 stringRedisTemplate,
                 new PlanRequestContextBuilder(new PlanRequestNormalizer(), new PlanGenerationModeResolver()),
                 new AiDraftGenerationService(aiService, objectMapper),
-                new GenerateInitialPlanUseCase(
-                        new PlanRequestContextBuilder(new PlanRequestNormalizer(), new PlanGenerationModeResolver()),
-                        new LightweightRequestPreParser(),
-                        new RetrievalQueryBuilder(),
-                        new thesis.project.gu.catalog.local.StaticDestinationResolver(),
-                        new thesis.project.gu.catalog.application.LocalPlanningZoneRetrievalService(),
-                        new ZoneContextBuilder(),
-                        new LocalFallbackPlanningAgent(),
-                        new PlanningSpecificationValidator(),
-                        new thesis.project.gu.catalog.local.LocalPoiCatalogService(objectMapper),
+                buildGenerateInitialPlanUseCase(
+                        aiService,
+                        objectMapper,
+                        mapService,
+                        googlePlacesClient,
+                        daySkeletonService,
+                        placeHeuristicService,
+                        stringRedisTemplate,
                         localPlanGeneratorService,
                         localPlanQualityDiagnosticService,
-                        new DefaultRoutePlanningService(
-                                new RouteAwareScheduleRepairService(mapService, objectMapper, stringRedisTemplate, placeHeuristicService, daySkeletonService)
-                        ),
-                        new DefaultPlanQualityService(
-                                new DraftValidationService(
-                                        daySkeletonService,
-                                        placeHeuristicService,
-                                        new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
-                                ),
-                                new DeterministicPlanRepairService(
-                                        duplicatePoiRepairService,
-                                        new MealTimeWindowRepairService(
-                                                daySkeletonService,
-                                                new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
-                                        )
-                                ),
-                                new PostRoutePlanRepairService(new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService), daySkeletonService)
-                        ),
-                        new AiDraftGenerationService(aiService, objectMapper)
+                        duplicatePoiRepairService
                 ),
                 new PlanRepairPipelineService(restaurantVerificationService),
                 new PlanResponseAssembler(),
@@ -263,6 +243,56 @@ public class PlanProcessorService {
                         ),
                         new PostRoutePlanRepairService(new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService), daySkeletonService)
                 )
+        );
+    }
+
+    private static GenerateInitialPlanUseCase buildGenerateInitialPlanUseCase(
+            TripAiService aiService,
+            ObjectMapper objectMapper,
+            MapService mapService,
+            GooglePlacesClient googlePlacesClient,
+            DaySkeletonService daySkeletonService,
+            PlaceHeuristicService placeHeuristicService,
+            StringRedisTemplate stringRedisTemplate,
+            LocalPlanGeneratorService localPlanGeneratorService,
+            LocalPlanQualityDiagnosticService localPlanQualityDiagnosticService,
+            DuplicatePoiRepairService duplicatePoiRepairService
+    ) {
+        thesis.project.gu.catalog.application.CoverageInventoryBuilder coverageInventoryBuilder =
+                new thesis.project.gu.catalog.application.CoverageInventoryBuilder();
+        return new GenerateInitialPlanUseCase(
+                new PlanRequestContextBuilder(new PlanRequestNormalizer(), new PlanGenerationModeResolver()),
+                new LightweightRequestPreParser(),
+                new RetrievalQueryBuilder(),
+                new thesis.project.gu.catalog.local.StaticDestinationResolver(),
+                new thesis.project.gu.catalog.application.LocalPlanningZoneRetrievalService(),
+                new ZoneContextBuilder(),
+                new LocalFallbackPlanningAgent(),
+                new PlanningSpecificationValidator(),
+                coverageInventoryBuilder,
+                new thesis.project.gu.catalog.application.CoverageGapResolutionService(coverageInventoryBuilder),
+                new thesis.project.gu.catalog.local.LocalPoiCatalogService(objectMapper, coverageInventoryBuilder),
+                localPlanGeneratorService,
+                localPlanQualityDiagnosticService,
+                new DefaultRoutePlanningService(
+                        new RouteAwareScheduleRepairService(mapService, objectMapper, stringRedisTemplate, placeHeuristicService, daySkeletonService)
+                ),
+                new DefaultPlanQualityService(
+                        new DraftValidationService(
+                                daySkeletonService,
+                                placeHeuristicService,
+                                new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
+                        ),
+                        new DeterministicPlanRepairService(
+                                duplicatePoiRepairService,
+                                new MealTimeWindowRepairService(
+                                        daySkeletonService,
+                                        new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService)
+                                )
+                        ),
+                        new PostRoutePlanRepairService(new ThemeParkGovernanceService(googlePlacesClient, placeHeuristicService), daySkeletonService)
+                ),
+                new AiDraftGenerationService(aiService, objectMapper)
         );
     }
 

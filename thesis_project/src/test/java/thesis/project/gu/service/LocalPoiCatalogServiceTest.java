@@ -191,6 +191,94 @@ class LocalPoiCatalogServiceTest {
     }
 
     @Test
+    void buildsTripSkeletonFromDayStrategyAllocationAndFallbackZones() {
+        TripPlanningSpecification spec = strategySpec(
+                1,
+                List.of(),
+                List.of(new TripPlanningSpecification.DayStrategy(
+                        1,
+                        "South Bank short culture day",
+                        "brisbane-south-bank",
+                        List.of("brisbane-cbd"),
+                        "HALF_DAY",
+                        List.of("culture"),
+                        List.of("family-friendly")
+                ))
+        );
+
+        TripSkeleton skeleton = service.buildTripSkeleton(spec, service.findAvailableZones(spec));
+
+        TripSkeleton.DaySkeleton day = skeleton.days().getFirst();
+        assertThat(day.zoneId()).isEqualTo("brisbane-south-bank");
+        assertThat(day.fallbackZoneIds()).containsExactly("brisbane-cbd");
+        assertThat(day.slots())
+                .filteredOn(slot -> slot.slotType() == TripSlot.SlotType.ACTIVITY)
+                .hasSize(2)
+                .allSatisfy(slot -> {
+                    assertThat(slot.requiredCapabilities()).contains("family-friendly", "poi-type:culture");
+                    assertThat(slot.preferredDurationMinutes()).isEqualTo(75);
+                    assertThat(slot.preferredTimeWindow()).isNotNull();
+                });
+    }
+
+    @Test
+    void diningPreferenceDoesNotBecomeActivityRequiredCapability() {
+        TripPlanningSpecification spec = strategySpec(
+                1,
+                List.of(),
+                List.of(new TripPlanningSpecification.DayStrategy(
+                        1,
+                        "Dining and culture day",
+                        "brisbane-south-bank",
+                        List.of("brisbane-cbd"),
+                        "FULL_DAY",
+                        List.of("culture", "local-dining"),
+                        List.of()
+                ))
+        );
+
+        TripSkeleton skeleton = service.buildTripSkeleton(spec, service.findAvailableZones(spec));
+
+        assertThat(skeleton.days().getFirst().slots())
+                .filteredOn(slot -> slot.slotType() == TripSlot.SlotType.ACTIVITY)
+                .allSatisfy(slot -> {
+                    assertThat(slot.requiredCapabilities()).contains("poi-type:culture");
+                    assertThat(slot.requiredCapabilities()).doesNotContain("poi-type:local-dining");
+                });
+    }
+
+    @Test
+    void buildsSpecialEventSlotFromDayStrategyAndSpecialEvent() {
+        TripPlanningSpecification spec = strategySpec(
+                1,
+                List.of(new TripPlanningSpecification.SpecialEvent(1, "BIRTHDAY", List.of("birthday-suitable"))),
+                List.of(new TripPlanningSpecification.DayStrategy(
+                        1,
+                        "Birthday in South Bank",
+                        "brisbane-south-bank",
+                        List.of("brisbane-cbd"),
+                        "FULL_DAY",
+                        List.of("culture"),
+                        List.of("family-friendly")
+                ))
+        );
+
+        TripSkeleton skeleton = service.buildTripSkeleton(spec, service.findAvailableZones(spec));
+
+        assertThat(skeleton.days().getFirst().slots())
+                .anySatisfy(slot -> {
+                    assertThat(slot.slotType()).isEqualTo(TripSlot.SlotType.SPECIAL_EVENT);
+                    assertThat(slot.zoneId()).isEqualTo("brisbane-south-bank");
+                    assertThat(slot.requiredCapabilities()).contains("birthday-suitable", "family-friendly");
+                    assertThat(slot.preferredTimeWindow()).isEqualTo(new TripSlot.TimeWindow("17:00", "20:30"));
+                });
+        assertThat(skeleton.days().getFirst().slots())
+                .filteredOn(slot -> slot.slotType() == TripSlot.SlotType.DINNER)
+                .singleElement()
+                .satisfies(slot -> assertThat(slot.requiredCapabilities()).contains("birthday-suitable"));
+    }
+
+    @Test
     void coverageCheckDistinguishesHardGapsFromReducedFallbackMargin() {
         TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Testville", 1, "normal"));
         TripSkeleton skeleton = service.buildTripSkeleton(spec);
@@ -203,6 +291,44 @@ class LocalPoiCatalogServiceTest {
         assertThat(coverage.gaps()).anySatisfy(gap -> {
             assertThat(gap.requiredUsageCount()).isGreaterThan(gap.availableCandidateCount());
             assertThat(gap.missingCount()).isGreaterThan(0);
+        });
+    }
+
+    @Test
+    void coverageCheckUsesSlotCapabilitiesFromRequestScopedInventory() {
+        TripPlanningSpecification spec = new TripPlanningSpecification(
+                new TripPlanningSpecification.Destination("Testville"),
+                1,
+                1200,
+                new TripPlanningSpecification.Party(2, 0),
+                List.of("culture"),
+                "normal",
+                "local-fast",
+                null,
+                TripPlanningSpecification.Constraints.defaults(),
+                List.of(),
+                List.of(new TripPlanningSpecification.DayStrategy(
+                        1,
+                        "Culture day",
+                        "testville-central",
+                        List.of(),
+                        "FULL_DAY",
+                        List.of("culture"),
+                        List.of()
+                ))
+        );
+        TripSkeleton skeleton = service.buildTripSkeleton(spec);
+        PlaceCandidatePool pool = service.buildCandidatePool(spec);
+        List<AvailableZoneSummary> summaries = service.findAvailableZoneSummaries(spec, service.findAvailableZones(spec));
+
+        CoverageResult coverage = service.checkCoverage(spec, skeleton, pool, summaries);
+
+        assertThat(coverage.generatable()).isFalse();
+        assertThat(coverage.gaps()).anySatisfy(gap -> {
+            assertThat(gap.slotType()).isEqualTo("ACTIVITY");
+            assertThat(gap.requiredCapabilities()).contains("poi-type:culture");
+            assertThat(gap.requiredUsageCount()).isEqualTo(3);
+            assertThat(gap.availableCandidateCount()).isEqualTo(1);
         });
     }
 
@@ -236,6 +362,27 @@ class LocalPoiCatalogServiceTest {
                 pace,
                 "local-fast",
                 null
+        );
+    }
+
+    private TripPlanningSpecification strategySpec(
+            int days,
+            List<TripPlanningSpecification.SpecialEvent> specialEvents,
+            List<TripPlanningSpecification.DayStrategy> dayStrategies
+    ) {
+        TripPlanningSpecification base = TripPlanningSpecification.fromRequest(req("Brisbane", days, "normal"));
+        return new TripPlanningSpecification(
+                base.destination(),
+                base.days(),
+                base.budget(),
+                base.party(),
+                base.styles(),
+                base.pace(),
+                base.mainModel(),
+                base.departureDate(),
+                base.constraints(),
+                specialEvents,
+                dayStrategies
         );
     }
 

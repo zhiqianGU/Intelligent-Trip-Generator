@@ -3,10 +3,17 @@ package thesis.project.gu.planning.application;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import thesis.project.gu.exception.ErrorCode;
 import thesis.project.gu.catalog.application.DestinationCatalog;
 import thesis.project.gu.catalog.application.DestinationResolver;
+import thesis.project.gu.catalog.application.CoverageGapResolutionService;
+import thesis.project.gu.catalog.application.CoverageInventoryBuilder;
 import thesis.project.gu.catalog.application.PlanningZoneRetrievalService;
 import thesis.project.gu.catalog.domain.AvailableZoneSummary;
+import thesis.project.gu.catalog.domain.CatalogInventory;
+import thesis.project.gu.catalog.domain.CoverageGap;
+import thesis.project.gu.catalog.domain.CoverageInventory;
+import thesis.project.gu.catalog.domain.CoverageResolutionResult;
 import thesis.project.gu.catalog.domain.CoverageResult;
 import thesis.project.gu.catalog.domain.Destination;
 import thesis.project.gu.catalog.domain.PlanningZoneRetrievalResult;
@@ -22,6 +29,7 @@ import thesis.project.gu.planning.domain.PlanningAgentOutput;
 import thesis.project.gu.planning.domain.PlanningZoneRetrievalQuery;
 import thesis.project.gu.planning.domain.SpecificationValidationResult;
 import thesis.project.gu.planning.domain.TripSkeleton;
+import thesis.project.gu.planning.domain.TripSlot;
 import thesis.project.gu.planning.domain.TripPlanningSpecification;
 import thesis.project.gu.planning.domain.ZoneContext;
 import thesis.project.gu.planning.metrics.PlanStageMetrics;
@@ -44,6 +52,8 @@ public class GenerateInitialPlanUseCase {
     private final PlanningAgent planningAgent;
     private final PlanningAgent fallbackPlanningAgent = new LocalFallbackPlanningAgent();
     private final PlanningSpecificationValidator planningSpecificationValidator;
+    private final CoverageInventoryBuilder coverageInventoryBuilder;
+    private final CoverageGapResolutionService coverageGapResolutionService;
     private final DestinationCatalog destinationCatalog;
     private final ItineraryGenerator itineraryGenerator;
     private final PlanQualityService planQualityService;
@@ -60,6 +70,8 @@ public class GenerateInitialPlanUseCase {
             ZoneContextBuilder zoneContextBuilder,
             PlanningAgent planningAgent,
             PlanningSpecificationValidator planningSpecificationValidator,
+            CoverageInventoryBuilder coverageInventoryBuilder,
+            CoverageGapResolutionService coverageGapResolutionService,
             DestinationCatalog destinationCatalog,
             ItineraryGenerator itineraryGenerator,
             PlanQualityService planQualityService,
@@ -75,6 +87,8 @@ public class GenerateInitialPlanUseCase {
         this.zoneContextBuilder = zoneContextBuilder;
         this.planningAgent = planningAgent;
         this.planningSpecificationValidator = planningSpecificationValidator;
+        this.coverageInventoryBuilder = coverageInventoryBuilder;
+        this.coverageGapResolutionService = coverageGapResolutionService;
         this.destinationCatalog = destinationCatalog;
         this.itineraryGenerator = itineraryGenerator;
         this.planQualityService = planQualityService;
@@ -114,9 +128,38 @@ public class GenerateInitialPlanUseCase {
             specification = specificationValidation.specification();
             TripSkeleton skeleton = destinationCatalog.buildTripSkeleton(specification, zones);
             PlaceCandidatePool candidatePool = destinationCatalog.buildCandidatePool(specification);
-            CoverageResult coverage = destinationCatalog.checkCoverage(specification, skeleton, candidatePool);
+            CoverageResult coverage = destinationCatalog.checkCoverage(specification, skeleton, candidatePool, availableZoneSummaries, zones);
+            CoverageResolutionResult coverageResolution = null;
+            if (!coverage.generatable()) {
+                CoverageInventory coverageInventory = coverageInventoryBuilder.build(
+                        specification,
+                        skeleton,
+                        CatalogInventory.fromCandidatePool(candidatePool),
+                        availableZoneSummaries,
+                        zones
+                );
+                coverageResolution = coverageGapResolutionService.resolve(
+                        skeleton,
+                        coverageInventory,
+                        CatalogInventory.fromCandidatePool(candidatePool),
+                        availableZoneSummaries,
+                        zones
+                );
+                if (coverageResolution.modified()) {
+                    skeleton = coverageResolution.skeleton();
+                    coverage = destinationCatalog.checkCoverage(specification, skeleton, candidatePool, availableZoneSummaries, zones);
+                }
+            }
+            if (!coverage.generatable()) {
+                TripSkeleton reducedSkeleton = reduceNonEssentialActivitySlots(skeleton, coverage);
+                if (reducedSkeleton != skeleton) {
+                    skeleton = reducedSkeleton;
+                    coverage = destinationCatalog.checkCoverage(specification, skeleton, candidatePool, availableZoneSummaries, zones);
+                }
+            }
             if (!coverage.generatable()) {
                 log.warn("Local fast catalog coverage has hard gaps city={} gaps={}", context.city(), coverage.gaps());
+                throw ErrorCode.ROUTE_FAIL.ex("No feasible local plan coverage for requested itinerary: " + coverage.gaps());
             } else if (!coverage.preferredCoverageMet()) {
                 log.info("Local fast catalog coverage has reduced fallback margin city={} softGaps={}", context.city(), coverage.softGaps());
             }
@@ -192,6 +235,13 @@ public class GenerateInitialPlanUseCase {
                     specificationValidation.inputValid(),
                     specificationValidation.repaired(),
                     specificationValidation.issues());
+            if (coverageResolution != null) {
+                log.debug("Local fast coverage gap resolution resolved={} modified={} actions={} unresolvedHardGaps={}",
+                        coverageResolution.resolved(),
+                        coverageResolution.modified(),
+                        coverageResolution.actions(),
+                        coverageResolution.unresolvedHardGaps());
+            }
             return draft;
         }
 
@@ -224,6 +274,47 @@ public class GenerateInitialPlanUseCase {
             log.warn("Planning agent failed; falling back to local planner. reason={}", e.toString());
         }
         return fallbackPlanningAgent.plan(input);
+    }
+
+    private TripSkeleton reduceNonEssentialActivitySlots(TripSkeleton skeleton, CoverageResult coverage) {
+        if (skeleton == null || skeleton.days() == null || coverage == null || coverage.gaps() == null || coverage.gaps().isEmpty()) {
+            return skeleton;
+        }
+        List<TripSkeleton.DaySkeleton> days = new ArrayList<>();
+        boolean changed = false;
+        for (TripSkeleton.DaySkeleton day : skeleton.days()) {
+            int removableActivities = coverage.gaps().stream()
+                    .filter(gap -> gap.day() == day.day())
+                    .filter(gap -> "ACTIVITY".equals(gap.slotType()))
+                    .mapToInt(CoverageGap::missingCount)
+                    .sum();
+            if (removableActivities <= 0) {
+                days.add(day);
+                continue;
+            }
+            List<TripSlot> slots = new ArrayList<>(day.slots());
+            int activityCount = (int) slots.stream()
+                    .filter(slot -> slot.slotType() == TripSlot.SlotType.ACTIVITY)
+                    .count();
+            int maxRemovable = Math.max(0, activityCount - 1);
+            int removeCount = Math.min(removableActivities, maxRemovable);
+            for (int index = slots.size() - 1; index >= 0 && removeCount > 0; index--) {
+                if (slots.get(index).slotType() == TripSlot.SlotType.ACTIVITY) {
+                    slots.remove(index);
+                    removeCount--;
+                    changed = true;
+                }
+            }
+            days.add(new TripSkeleton.DaySkeleton(
+                    day.day(),
+                    day.theme(),
+                    day.zoneId(),
+                    day.startTime(),
+                    slots,
+                    day.fallbackZoneIds()
+            ));
+        }
+        return changed ? new TripSkeleton(days) : skeleton;
     }
 
     public PlanDraftResponse processGeneratedRawDraft(
