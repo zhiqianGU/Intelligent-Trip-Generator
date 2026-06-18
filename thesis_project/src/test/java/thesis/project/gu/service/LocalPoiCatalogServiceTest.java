@@ -2,7 +2,9 @@ package thesis.project.gu.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import thesis.project.gu.catalog.domain.AvailableZoneSummary;
 import thesis.project.gu.catalog.domain.CoverageResult;
+import thesis.project.gu.catalog.domain.PlanningZoneSnapshot;
 import thesis.project.gu.catalog.domain.PlanningZoneSummary;
 import thesis.project.gu.catalog.local.LocalPoiCatalog;
 import thesis.project.gu.catalog.local.LocalPoiItem;
@@ -91,6 +93,75 @@ class LocalPoiCatalogServiceTest {
     }
 
     @Test
+    void buildsStaticZoneSnapshotsFromLocalPoiAreas() {
+        TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Brisbane", 3, "normal"));
+
+        List<PlanningZoneSnapshot> snapshots = service.findZoneSnapshots(spec);
+
+        assertThat(snapshots).isNotEmpty();
+        assertThat(snapshots).anySatisfy(snapshot -> {
+            assertThat(snapshot.zoneId()).isEqualTo("brisbane-south-bank");
+            assertThat(snapshot.zoneType()).isEqualTo("URBAN_DISTRICT");
+            assertThat(snapshot.totalAttractionCount()).isGreaterThan(0);
+            assertThat(snapshot.totalRestaurantCount()).isGreaterThan(0);
+            assertThat(snapshot.anchorPoiIds()).isNotEmpty();
+            assertThat(snapshot.semanticProfile()).contains("south-bank");
+            assertThat(snapshot.snapshotVersion()).isEqualTo("local-poi-v1");
+            assertThat(snapshot.generatedAt()).isNotBlank();
+        });
+    }
+
+    @Test
+    void zoneSnapshotBuildReusesCandidatePoolWithinSingleCall() {
+        CountingLocalPoiCatalogService countingService = new CountingLocalPoiCatalogService(new ObjectMapper());
+        TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Brisbane", 3, "normal"));
+
+        List<PlanningZoneSnapshot> snapshots = countingService.findZoneSnapshots(spec);
+
+        assertThat(snapshots).isNotEmpty();
+        assertThat(countingService.buildCandidatePoolCalls).isLessThanOrEqualTo(2);
+    }
+
+    @Test
+    void buildsRequestScopedAvailableZoneSummaries() {
+        TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Brisbane", 3, "relaxed", 240, 1));
+        List<PlanningZoneSummary> zones = service.findAvailableZones(spec);
+        PlanningZoneSummary southBank = zones.stream()
+                .filter(zone -> "brisbane-south-bank".equals(zone.zoneId()))
+                .findFirst()
+                .orElseThrow();
+
+        List<AvailableZoneSummary> summaries = service.findAvailableZoneSummaries(spec, List.of(southBank));
+
+        assertThat(summaries).hasSize(1);
+        AvailableZoneSummary summary = summaries.getFirst();
+        assertThat(summary.zoneId()).isEqualTo("brisbane-south-bank");
+        assertThat(summary.availableAttractionCount()).isGreaterThanOrEqualTo(0);
+        assertThat(summary.availableFamilyCount()).isGreaterThanOrEqualTo(0);
+        assertThat(summary.availableLunchCount()).isGreaterThanOrEqualTo(0);
+        assertThat(summary.availableDinnerCount()).isGreaterThanOrEqualTo(0);
+        assertThat(summary.requestScopedCapacity()).isGreaterThanOrEqualTo(0);
+        assertThat(summary.freshnessStatus()).isEqualTo("LOCAL_CURATED");
+    }
+
+    @Test
+    void diningPreferenceDoesNotFilterOutAttractionAvailability() {
+        TripPlanningSpecification noStyleSpec = TripPlanningSpecification.fromRequest(req("Brisbane", 3, "normal", 1200, 0, List.of()));
+        TripPlanningSpecification diningSpec = TripPlanningSpecification.fromRequest(req("Brisbane", 3, "normal", 1200, 0, List.of("food")));
+        PlanningZoneSummary southBank = service.findAvailableZones(noStyleSpec).stream()
+                .filter(zone -> "brisbane-south-bank".equals(zone.zoneId()))
+                .findFirst()
+                .orElseThrow();
+
+        AvailableZoneSummary noStyleSummary = service.findAvailableZoneSummaries(noStyleSpec, List.of(southBank)).getFirst();
+        AvailableZoneSummary diningSummary = service.findAvailableZoneSummaries(diningSpec, List.of(southBank)).getFirst();
+
+        assertThat(noStyleSummary.availableAttractionCount()).isGreaterThan(0);
+        assertThat(diningSummary.availableAttractionCount()).isEqualTo(noStyleSummary.availableAttractionCount());
+        assertThat(diningSummary.requestScopedCapacity()).isEqualTo(noStyleSummary.requestScopedCapacity());
+    }
+
+    @Test
     void buildsTripSkeletonBeforeCoverageCheck() {
         TripPlanningSpecification spec = TripPlanningSpecification.fromRequest(req("Brisbane", 2, "relaxed"));
 
@@ -148,15 +219,37 @@ class LocalPoiCatalogServiceTest {
     }
 
     private CreatePlanReq req(String city, int days, String pace) {
+        return req(city, days, pace, 1200, 0);
+    }
+
+    private CreatePlanReq req(String city, int days, String pace, int budget, int kids) {
+        return req(city, days, pace, budget, kids, List.of("culture"));
+    }
+
+    private CreatePlanReq req(String city, int days, String pace, int budget, int kids, List<String> styles) {
         return new CreatePlanReq(
                 city,
                 days,
-                1200,
-                new CreatePlanReq.Party(2, 0),
-                List.of("culture"),
+                budget,
+                new CreatePlanReq.Party(2, kids),
+                styles,
                 pace,
                 "local-fast",
                 null
         );
+    }
+
+    private static class CountingLocalPoiCatalogService extends LocalPoiCatalogService {
+        private int buildCandidatePoolCalls;
+
+        private CountingLocalPoiCatalogService(ObjectMapper objectMapper) {
+            super(objectMapper);
+        }
+
+        @Override
+        public PlaceCandidatePool buildCandidatePool(TripPlanningSpecification specification) {
+            buildCandidatePoolCalls++;
+            return super.buildCandidatePool(specification);
+        }
     }
 }

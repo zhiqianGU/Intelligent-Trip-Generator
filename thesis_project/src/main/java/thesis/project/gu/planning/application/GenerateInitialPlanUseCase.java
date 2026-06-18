@@ -6,18 +6,24 @@ import org.springframework.stereotype.Service;
 import thesis.project.gu.catalog.application.DestinationCatalog;
 import thesis.project.gu.catalog.application.DestinationResolver;
 import thesis.project.gu.catalog.application.PlanningZoneRetrievalService;
+import thesis.project.gu.catalog.domain.AvailableZoneSummary;
 import thesis.project.gu.catalog.domain.CoverageResult;
 import thesis.project.gu.catalog.domain.Destination;
 import thesis.project.gu.catalog.domain.PlanningZoneRetrievalResult;
+import thesis.project.gu.catalog.domain.PlanningZoneSnapshot;
 import thesis.project.gu.catalog.domain.PlanningZoneSummary;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
 import thesis.project.gu.planning.domain.ParsedPlanningRequest;
 import thesis.project.gu.planning.domain.PlaceCandidatePool;
 import thesis.project.gu.planning.domain.PlanDraft;
+import thesis.project.gu.planning.domain.PlanningAgentInput;
+import thesis.project.gu.planning.domain.PlanningAgentOutput;
 import thesis.project.gu.planning.domain.PlanningZoneRetrievalQuery;
+import thesis.project.gu.planning.domain.SpecificationValidationResult;
 import thesis.project.gu.planning.domain.TripSkeleton;
 import thesis.project.gu.planning.domain.TripPlanningSpecification;
+import thesis.project.gu.planning.domain.ZoneContext;
 import thesis.project.gu.planning.metrics.PlanStageMetrics;
 import thesis.project.gu.planning.quality.LocalPlanQualityReport;
 import thesis.project.gu.planning.quality.PlanQualityService;
@@ -34,6 +40,10 @@ public class GenerateInitialPlanUseCase {
     private final RetrievalQueryBuilder retrievalQueryBuilder;
     private final DestinationResolver destinationResolver;
     private final PlanningZoneRetrievalService planningZoneRetrievalService;
+    private final ZoneContextBuilder zoneContextBuilder;
+    private final PlanningAgent planningAgent;
+    private final PlanningAgent fallbackPlanningAgent = new LocalFallbackPlanningAgent();
+    private final PlanningSpecificationValidator planningSpecificationValidator;
     private final DestinationCatalog destinationCatalog;
     private final ItineraryGenerator itineraryGenerator;
     private final PlanQualityService planQualityService;
@@ -47,6 +57,9 @@ public class GenerateInitialPlanUseCase {
             RetrievalQueryBuilder retrievalQueryBuilder,
             DestinationResolver destinationResolver,
             PlanningZoneRetrievalService planningZoneRetrievalService,
+            ZoneContextBuilder zoneContextBuilder,
+            PlanningAgent planningAgent,
+            PlanningSpecificationValidator planningSpecificationValidator,
             DestinationCatalog destinationCatalog,
             ItineraryGenerator itineraryGenerator,
             PlanQualityService planQualityService,
@@ -59,6 +72,9 @@ public class GenerateInitialPlanUseCase {
         this.retrievalQueryBuilder = retrievalQueryBuilder;
         this.destinationResolver = destinationResolver;
         this.planningZoneRetrievalService = planningZoneRetrievalService;
+        this.zoneContextBuilder = zoneContextBuilder;
+        this.planningAgent = planningAgent;
+        this.planningSpecificationValidator = planningSpecificationValidator;
         this.destinationCatalog = destinationCatalog;
         this.itineraryGenerator = itineraryGenerator;
         this.planQualityService = planQualityService;
@@ -88,6 +104,14 @@ public class GenerateInitialPlanUseCase {
             List<PlanningZoneSummary> zones = retrievalResult.orderedZones().isEmpty()
                     ? availableZones
                     : retrievalResult.orderedZones();
+            List<AvailableZoneSummary> availableZoneSummaries = destinationCatalog.findAvailableZoneSummaries(specification, zones);
+            List<PlanningZoneSnapshot> zoneSnapshots = destinationCatalog.findZoneSnapshots(specification);
+            List<ZoneContext> zoneContexts = zoneContextBuilder.build(zones, zoneSnapshots, availableZoneSummaries);
+            PlanningAgentInput planningAgentInput = new PlanningAgentInput(specification, parsedRequest, zoneContexts);
+            PlanningAgentOutput planningOutput = planWithFallback(planningAgentInput);
+            specification = specification.withAgentOutput(planningOutput);
+            SpecificationValidationResult specificationValidation = planningSpecificationValidator.validate(specification, zoneContexts, parsedRequest);
+            specification = specificationValidation.specification();
             TripSkeleton skeleton = destinationCatalog.buildTripSkeleton(specification, zones);
             PlaceCandidatePool candidatePool = destinationCatalog.buildCandidatePool(specification);
             CoverageResult coverage = destinationCatalog.checkCoverage(specification, skeleton, candidatePool);
@@ -145,6 +169,29 @@ public class GenerateInitialPlanUseCase {
                     retrievalResult.feasibilityFallbackCandidates().stream()
                             .map(candidate -> candidate.zone().zoneId() + ":" + candidate.score())
                             .toList());
+            log.debug("Local fast request-scoped zone summaries={}",
+                    availableZoneSummaries.stream()
+                            .map(summary -> summary.zoneId() + ":activities=" + summary.availableAttractionCount()
+                                    + ",capacity=" + summary.requestScopedCapacity()
+                                    + ",freshness=" + summary.freshnessStatus())
+                            .toList());
+            log.debug("Local fast compact zone contexts={}",
+                    zoneContexts.stream()
+                            .map(zone -> zone.zoneId() + ":weather=" + zone.weatherSuitability()
+                                    + ",capacity=" + zone.capacity()
+                                    + ",snapshot=" + zone.snapshotVersion())
+                            .toList());
+            log.debug("Local fast planning agent plannerType={} fallbackUsed={} dayStrategies={}",
+                    planningOutput.plannerType(),
+                    planningOutput.fallbackUsed(),
+                    planningOutput.dayStrategies().stream()
+                            .map(strategy -> "day" + strategy.day() + ":" + strategy.primaryZoneId())
+                            .toList());
+            log.debug("Local fast planning specification validation valid={} inputValid={} repaired={} issues={}",
+                    specificationValidation.valid(),
+                    specificationValidation.inputValid(),
+                    specificationValidation.repaired(),
+                    specificationValidation.issues());
             return draft;
         }
 
@@ -164,6 +211,19 @@ public class GenerateInitialPlanUseCase {
                 context.deferCopyPolish(),
                 operations
         );
+    }
+
+    private PlanningAgentOutput planWithFallback(PlanningAgentInput input) {
+        try {
+            PlanningAgentOutput output = planningAgent == null ? null : planningAgent.plan(input);
+            if (output != null) {
+                return output;
+            }
+            log.warn("Planning agent returned null output; falling back to local planner.");
+        } catch (Exception e) {
+            log.warn("Planning agent failed; falling back to local planner. reason={}", e.toString());
+        }
+        return fallbackPlanningAgent.plan(input);
     }
 
     public PlanDraftResponse processGeneratedRawDraft(

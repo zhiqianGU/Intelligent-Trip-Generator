@@ -41,6 +41,9 @@ class GenerateInitialPlanUseCaseTest {
                 new RetrievalQueryBuilder(),
                 destinationCandidate -> new Destination("AU-QLD-BRISBANE", "Brisbane", "Queensland", "Australia", "Australia/Brisbane", true),
                 retrievalService,
+                new ZoneContextBuilder(),
+                new LocalFallbackPlanningAgent(),
+                new PlanningSpecificationValidator(),
                 catalog,
                 generator,
                 passingQualityService(),
@@ -68,7 +71,101 @@ class GenerateInitialPlanUseCaseTest {
         assertThat(catalog.orderedZonesPassedToSkeleton)
                 .extracting(PlanningZoneSummary::zoneId)
                 .containsExactly("brisbane-south-bank", "brisbane-cbd");
+        assertThat(catalog.specificationPassedToSkeleton.dayStrategies())
+                .extracting(TripPlanningSpecification.DayStrategy::primaryZoneId)
+                .containsExactly("brisbane-south-bank");
         assertThat(generator.receivedSkeleton.days().getFirst().zoneId()).isEqualTo("brisbane-south-bank");
+    }
+
+    @Test
+    void planningAgentFailureFallsBackToLocalStrategyAndStillBuildsSkeleton() throws Exception {
+        PlanningZoneSummary southBank = zone("brisbane-south-bank", "South Bank");
+        CapturingDestinationCatalog catalog = new CapturingDestinationCatalog(List.of(southBank));
+        CapturingItineraryGenerator generator = new CapturingItineraryGenerator();
+        PlanningZoneRetrievalService retrievalService = (query, availableZones) -> new PlanningZoneRetrievalResult(List.of(), List.of());
+        PlanningAgent failingAgent = input -> {
+            throw new IllegalStateException("agent timeout");
+        };
+        GenerateInitialPlanUseCase useCase = new GenerateInitialPlanUseCase(
+                new PlanRequestContextBuilder(new PlanRequestNormalizer(), new PlanGenerationModeResolver()),
+                new LightweightRequestPreParser(),
+                new RetrievalQueryBuilder(),
+                destinationCandidate -> new Destination("AU-QLD-BRISBANE", "Brisbane", "Queensland", "Australia", "Australia/Brisbane", true),
+                retrievalService,
+                new ZoneContextBuilder(),
+                failingAgent,
+                new PlanningSpecificationValidator(),
+                catalog,
+                generator,
+                passingQualityService(),
+                null,
+                null,
+                null
+        );
+
+        useCase.execute(
+                new CreatePlanReq(
+                        "Brisbane",
+                        1,
+                        1200,
+                        new CreatePlanReq.Party(2, 0),
+                        List.of("culture"),
+                        "normal",
+                        "local-fast",
+                        null
+                ),
+                false,
+                false,
+                new NoopOperations()
+        );
+
+        assertThat(catalog.specificationPassedToSkeleton.dayStrategies())
+                .extracting(TripPlanningSpecification.DayStrategy::primaryZoneId)
+                .containsExactly("brisbane-south-bank");
+        assertThat(generator.receivedSkeleton).isNotNull();
+    }
+
+    @Test
+    void nullPlanningAgentOutputFallsBackToLocalStrategy() throws Exception {
+        PlanningZoneSummary southBank = zone("brisbane-south-bank", "South Bank");
+        CapturingDestinationCatalog catalog = new CapturingDestinationCatalog(List.of(southBank));
+        CapturingItineraryGenerator generator = new CapturingItineraryGenerator();
+        GenerateInitialPlanUseCase useCase = new GenerateInitialPlanUseCase(
+                new PlanRequestContextBuilder(new PlanRequestNormalizer(), new PlanGenerationModeResolver()),
+                new LightweightRequestPreParser(),
+                new RetrievalQueryBuilder(),
+                destinationCandidate -> new Destination("AU-QLD-BRISBANE", "Brisbane", "Queensland", "Australia", "Australia/Brisbane", true),
+                (query, availableZones) -> new PlanningZoneRetrievalResult(List.of(), List.of()),
+                new ZoneContextBuilder(),
+                input -> null,
+                new PlanningSpecificationValidator(),
+                catalog,
+                generator,
+                passingQualityService(),
+                null,
+                null,
+                null
+        );
+
+        useCase.execute(
+                new CreatePlanReq(
+                        "Brisbane",
+                        1,
+                        1200,
+                        new CreatePlanReq.Party(2, 0),
+                        List.of("culture"),
+                        "normal",
+                        "local-fast",
+                        null
+                ),
+                false,
+                false,
+                new NoopOperations()
+        );
+
+        assertThat(catalog.specificationPassedToSkeleton.dayStrategies())
+                .extracting(TripPlanningSpecification.DayStrategy::primaryZoneId)
+                .containsExactly("brisbane-south-bank");
     }
 
     private static PlanQualityService passingQualityService() {
@@ -90,6 +187,7 @@ class GenerateInitialPlanUseCaseTest {
     private static class CapturingDestinationCatalog implements DestinationCatalog {
         private final List<PlanningZoneSummary> availableZones;
         private List<PlanningZoneSummary> orderedZonesPassedToSkeleton = List.of();
+        private TripPlanningSpecification specificationPassedToSkeleton;
 
         private CapturingDestinationCatalog(List<PlanningZoneSummary> availableZones) {
             this.availableZones = availableZones;
@@ -107,6 +205,7 @@ class GenerateInitialPlanUseCaseTest {
 
         @Override
         public TripSkeleton buildTripSkeleton(TripPlanningSpecification specification, List<PlanningZoneSummary> orderedZones) {
+            specificationPassedToSkeleton = specification;
             orderedZonesPassedToSkeleton = orderedZones == null ? List.of() : List.copyOf(orderedZones);
             String zoneId = orderedZonesPassedToSkeleton.isEmpty() ? null : orderedZonesPassedToSkeleton.getFirst().zoneId();
             return new TripSkeleton(List.of(new TripSkeleton.DaySkeleton(

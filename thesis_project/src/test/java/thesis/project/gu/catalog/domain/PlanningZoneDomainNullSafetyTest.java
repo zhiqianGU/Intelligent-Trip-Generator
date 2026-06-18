@@ -34,6 +34,43 @@ class PlanningZoneDomainNullSafetyTest {
     }
 
     @Test
+    void planningZoneSnapshotNormalizesNullCollectionsAndStrings() {
+        PlanningZoneSnapshot snapshot = new PlanningZoneSnapshot(
+                "zone-1",
+                "URBAN_DISTRICT",
+                null,
+                null,
+                1,
+                2,
+                null,
+                null,
+                null
+        );
+
+        assertThat(snapshot.themes()).isEmpty();
+        assertThat(snapshot.anchorPoiIds()).isEmpty();
+        assertThat(snapshot.semanticProfile()).isEmpty();
+        assertThat(snapshot.snapshotVersion()).isEmpty();
+        assertThat(snapshot.generatedAt()).isEmpty();
+    }
+
+    @Test
+    void availableZoneSummaryNormalizesNullFreshnessStatus() {
+        AvailableZoneSummary summary = new AvailableZoneSummary(
+                "zone-1",
+                1,
+                2,
+                3,
+                4,
+                5,
+                0,
+                null
+        );
+
+        assertThat(summary.freshnessStatus()).isEmpty();
+    }
+
+    @Test
     void retrievalResultNormalizesNullCandidateListsAndSkipsInvalidCandidates() {
         PlanningZoneSummary validZone = new PlanningZoneSummary(
                 "zone-1",

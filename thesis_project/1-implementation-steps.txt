@@ -780,7 +780,7 @@ score =
 
 ---
 
-## 阶段 11：拆分静态 Zone Snapshot 与请求级 Available Zone Summary
+## 阶段 11：拆分静态 Zone Snapshot 与请求级 Available Zone Summary（complete）
 
 目标：
 - 避免把静态 POI 总数误当成本次请求下可用数量。
@@ -830,9 +830,27 @@ record AvailableZoneSummary(
 - Agent 和 Coverage 使用 `AvailableZoneSummary`。
 - Snapshot 只作为稳定事实和离线索引来源。
 
+本次已实现：
+- 新增 `PlanningZoneSnapshot`，表达静态 Zone 事实、anchor POI、semanticProfile、snapshotVersion 和 generatedAt。
+- 新增 `AvailableZoneSummary`，表达本次请求下的可用活动、室内、家庭友好、午晚餐、容量和 freshness。
+- 扩展 `DestinationCatalog`，新增 `findZoneSnapshots` 和 `findAvailableZoneSummaries`，并提供默认空实现以降低迁移风险。
+- `LocalPoiCatalogService` 基于本地 POI area 聚合 snapshot，并基于预算、家庭友好、style 偏好和 pace 计算 request-scoped available summary。
+- `GenerateInitialPlanUseCase` 已生成 request-scoped zone summaries 并写入 debug trace；当前阶段暂不改变 retrieval / skeleton / scheduler 行为。
+- 补充 `LocalPoiCatalogServiceTest` 和 `PlanningZoneDomainNullSafetyTest`。
+
+验证：
+- `.\mvnw.cmd -q -DskipTests compile`
+- `.\mvnw.cmd -q "-Dtest=LocalPoiCatalogServiceTest,PlanningZoneDomainNullSafetyTest" test`
+- `.\mvnw.cmd -q -Dtest=GenerateInitialPlanUseCaseTest test`
+
+临时语义：
+- `generatedAt` 当前使用本地静态 snapshot 的确定性时间戳，后续接离线 snapshot 生成流程时替换为实际生成时间。
+- `anchorPoiIds` 当前使用本地 POI 名称 slug，后续有持久化 POI ID 后替换为真实 ID。
+- 营业时间、天气和数据新鲜度暂未接外部服务；后续由高德、和风天气和 catalog version 进入 request-scoped summary。
+
 ---
 
-## 阶段 12：Zone Context Builder
+## 阶段 12：Zone Context Builder（complete）
 
 目标：
 - 把候选 Zone 转成 Planning Agent 可读的紧凑能力上下文。
@@ -865,9 +883,26 @@ planning/application/ZoneContextBuilder.java
 - 从现有 `ZoneCapabilitySummary` 临时映射。
 - `weatherSuitability` 可以先用 indoor style/category 的启发式估计。
 
+本次已实现：
+- 新增 `planning/domain/ZoneContext.java`，作为 Planning Agent 前置输入的紧凑 Zone 能力上下文。
+- 新增 `planning/application/ZoneContextBuilder.java`，负责把 selected `PlanningZoneSummary`、`PlanningZoneSnapshot`、`AvailableZoneSummary` 合并为按 retrieval 顺序排列的 context。
+- `ZoneContext` 包含 zoneId、name、zoneType、themes、availablePoiCounts、mealSupport、capacity、weatherSuitability、recommendedAllocation、dataFreshness、semanticProfile、snapshotVersion。
+- `GenerateInitialPlanUseCase` 已构建 compact zone contexts 并写入 debug trace；当前阶段暂不改变 skeleton、coverage 或 scheduler 行为。
+- `PlanProcessorService` 的 legacy facade 构造路径已接入 `ZoneContextBuilder`。
+- 补充 `ZoneContextBuilderTest`，覆盖上下文合并、排序保持、缺失 summary fallback 和无效 zone 跳过。
+
+验证：
+- `.\mvnw.cmd -q -DskipTests compile`
+- `.\mvnw.cmd -q "-Dtest=ZoneContextBuilderTest,GenerateInitialPlanUseCaseTest" test`
+- `.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test`
+
+临时语义：
+- `weatherSuitability` 当前只基于 request-scoped indoor activity count 启发式生成，后续接和风天气后应改为天气快照 + indoor fallback 共同判断。
+- `ZoneContext` 当前只用于 trace 和下一阶段 Agent 输入准备，不直接影响 scheduler。
+
 ---
 
-## 阶段 13：Planning Agent 接口 + LocalFallbackPlanningAgent
+## 阶段 13：Planning Agent 接口 + LocalFallbackPlanningAgent（complete）
 
 目标：
 - 先定义 Agent 边界，但不马上依赖 LLM。
@@ -895,9 +930,31 @@ Agent 输出映射到：
 - 在 DestinationResolver、RetrievalQueryBuilder、Structured Zone Retrieval、ZoneContextBuilder、PlanningAgent 接口、SpecificationValidator 完成后，可以接真实 Single Planning Agent。
 - 不必等完整 slot filling 和向量数据库都完成后才接模型。
 
+本次已实现：
+- 新增 `planning/application/PlanningAgent.java`，定义受控 Planning Agent 边界。
+- 新增 `planning/application/LocalFallbackPlanningAgent.java`，不依赖 LLM，基于 ranked `ZoneContext` 生成 `DayStrategy`。
+- 新增 `planning/domain/PlanningAgentInput.java`，封装 `TripPlanningSpecification`、`ParsedPlanningRequest` 和 compact zone contexts。
+- 新增 `planning/domain/PlanningAgentOutput.java`，封装 normalizedConstraints、specialEvents、dayStrategies、plannerType 和 fallbackUsed。
+- `TripPlanningSpecification` 新增 `withAgentOutput(...)`，用不可变方式合并 Agent 输出。
+- `GenerateInitialPlanUseCase` 已调用 `PlanningAgent`，并把输出后的 specification 传给 skeleton builder。
+- `PlanProcessorService` 的 legacy facade 构造路径已接入 `LocalFallbackPlanningAgent`。
+- 补充 `LocalFallbackPlanningAgentTest`，覆盖 zone ranking 轮转、特殊日选择餐饮/文化支撑更好的 zone、无 zone fallback。
+- 扩展 `GenerateInitialPlanUseCaseTest`，验证 Agent dayStrategies 真正进入 skeleton 构建。
+
+验证：
+- `.\mvnw.cmd -q -DskipTests compile`
+- `.\mvnw.cmd -q "-Dtest=LocalFallbackPlanningAgentTest,GenerateInitialPlanUseCaseTest,ZoneContextBuilderTest" test`
+- `.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test`
+
+临时语义：
+- 当前 `PlanningAgent` 只有 `LocalFallbackPlanningAgent` 实现，`fallbackUsed=true` 是预期状态。
+- 真实 LLM Agent 尚未接入；后续应通过同一个 `PlanningAgent` 接口替换或路由。
+- `SpecialEvent` 依赖 pre-parser 的 `specialDayHints`，当前 pre-parser 仍未从自然语言文本中提取生日等事件。
+- Agent 输出尚未经过阶段 14 的 `PlanningSpecificationValidator`，因此下一阶段需要校验 dayStrategies 数量、zone 合法性、fallbackZoneIds 和特殊日语义。
+
 ---
 
-## 阶段 14：Planning Specification Validator
+## 阶段 14：Planning Specification Validator（complete）
 
 目标：
 - 对 Agent 或 fallback 生成的 `TripPlanningSpecification` 做确定性校验。
@@ -924,6 +981,36 @@ planning/domain/SpecificationValidationResult.java
 3. 使用 Agent fallback zone。
 4. 使用同城合法 zone。
 5. 最多一次重新规划。
+
+本次已实现：
+- 新增 `planning/application/PlanningSpecificationValidator.java`，作为 Agent 输出后的确定性校验与修复边界。
+- 新增 `planning/domain/SpecificationValidationResult.java`，记录修复后的 specification、valid/repaired 状态和 issues。
+- `GenerateInitialPlanUseCase` 已在 Agent 输出合并后、TripSkeleton 构建前执行 validator。
+- `PlanProcessorService` 的 legacy facade 构造路径已接入 `PlanningSpecificationValidator`。
+- 校验并修复：
+  - `days` 最小值。
+  - `dayStrategies` 数量必须覆盖 1..days。
+  - 删除超出 trip days 的 strategy。
+  - `primaryZoneId` 必须来自合法 `ZoneContext`。
+  - 非法 primary 优先使用合法 fallback zone，其次使用同城合法 zone。
+  - `fallbackZoneIds` 只保留合法 zone，去重并排除 primary。
+  - `allocation` 归一到 `FULL_DAY` / `HALF_DAY` / `FULL_OR_HALF_DAY`。
+  - 特殊日 day 必须落在 trip days 内。
+  - birthday 事件归一为 `BIRTHDAY`，并补 `birthday-suitable` capability。
+  - day strategy 根据 family / indoor / special day 补 requiredCapabilities。
+  - 有多个合法 zone 时减少连续重复 primary zone。
+- 补充 `PlanningSpecificationValidatorTest`，覆盖非法 primary、fallback 清洗、缺失/多余 day strategy、特殊日语义和连续重复 zone 修复。
+- 扩展 `GenerateInitialPlanUseCaseTest`，继续验证修复后的 Agent dayStrategies 进入 skeleton 构建。
+
+验证：
+- `.\mvnw.cmd -q -DskipTests compile`
+- `.\mvnw.cmd -q "-Dtest=PlanningSpecificationValidatorTest,LocalFallbackPlanningAgentTest,GenerateInitialPlanUseCaseTest" test`
+- `.\mvnw.cmd -q -Dtest=PlanProcessorServiceTest#generateDraftUsesLocalFastGeneratorWithoutAiOrCopyPolish test`
+
+临时语义：
+- 当前 validator 不触发 Agent 重新规划，只做一次确定性本地修复。
+- 连续重复 zone 的修复是轻量轮换策略；后续 Coverage 和 Slot Filling 阶段可以根据 capacity / route / weather 做更精细调整。
+- 特殊日仍依赖 pre-parser 或 Agent 输出；pre-parser 的自然语言事件抽取后续需要增强。
 
 ---
 

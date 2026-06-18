@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import thesis.project.gu.catalog.application.DestinationCatalog;
+import thesis.project.gu.catalog.domain.AvailableZoneSummary;
 import thesis.project.gu.catalog.domain.CoverageGap;
 import thesis.project.gu.catalog.domain.CoverageResult;
+import thesis.project.gu.catalog.domain.PlanningZoneSnapshot;
 import thesis.project.gu.catalog.domain.PlanningZoneSummary;
 import thesis.project.gu.catalog.domain.ZoneCapabilitySummary;
 import thesis.project.gu.planning.domain.PlaceCandidate;
@@ -16,6 +18,7 @@ import thesis.project.gu.planning.domain.TripSlot;
 import thesis.project.gu.planning.domain.TripPlanningSpecification;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -28,6 +31,8 @@ import java.util.stream.Collectors;
 @Service
 public class LocalPoiCatalogService implements DestinationCatalog {
     private static final String LOCAL_POI_ROOT = "local-poi/";
+    private static final String LOCAL_SNAPSHOT_VERSION = "local-poi-v1";
+    private static final String LOCAL_FRESHNESS_STATUS = "LOCAL_CURATED";
 
     private final ObjectMapper objectMapper;
     private final Map<String, LocalPoiCatalog> catalogCache = new ConcurrentHashMap<>();
@@ -64,6 +69,28 @@ public class LocalPoiCatalogService implements DestinationCatalog {
                 .sorted(Comparator
                         .comparingInt((PlanningZoneSummary zone) -> zone.capabilities().normalDayCapacity()).reversed()
                         .thenComparing(PlanningZoneSummary::name))
+                .toList();
+    }
+
+    @Override
+    public List<PlanningZoneSnapshot> findZoneSnapshots(TripPlanningSpecification specification) {
+        PlaceCandidatePool pool = buildCandidatePool(specification);
+        return findAvailableZones(specification).stream()
+                .map(zone -> toZoneSnapshot(pool, zone))
+                .toList();
+    }
+
+    @Override
+    public List<AvailableZoneSummary> findAvailableZoneSummaries(
+            TripPlanningSpecification specification,
+            List<PlanningZoneSummary> candidateZones
+    ) {
+        PlaceCandidatePool pool = buildCandidatePool(specification);
+        List<PlanningZoneSummary> zones = candidateZones == null || candidateZones.isEmpty()
+                ? findAvailableZones(specification)
+                : candidateZones;
+        return zones.stream()
+                .map(zone -> toAvailableZoneSummary(specification, pool, zone))
                 .toList();
     }
 
@@ -246,6 +273,155 @@ public class LocalPoiCatalogService implements DestinationCatalog {
                 capabilities,
                 capabilities.normalDayCapacity() >= 1 ? "FULL_DAY" : "HALF_DAY"
         );
+    }
+
+    private PlanningZoneSnapshot toZoneSnapshot(
+            PlaceCandidatePool pool,
+            PlanningZoneSummary zone
+    ) {
+        List<PlaceCandidate> attractions = candidatesForZone(pool.attractions(), zone.zoneId());
+        List<PlaceCandidate> restaurants = candidatesForZone(pool.restaurants(), zone.zoneId());
+        return new PlanningZoneSnapshot(
+                zone.zoneId(),
+                zone.zoneType(),
+                zone.themes(),
+                anchorPoiIds(attractions),
+                attractions.size(),
+                restaurants.size(),
+                semanticProfile(zone),
+                LOCAL_SNAPSHOT_VERSION,
+                Instant.EPOCH.toString()
+        );
+    }
+
+    private AvailableZoneSummary toAvailableZoneSummary(
+            TripPlanningSpecification specification,
+            PlaceCandidatePool pool,
+            PlanningZoneSummary zone
+    ) {
+        List<PlaceCandidate> attractions = requestScopedAttractions(
+                specification,
+                candidatesForZone(pool.attractions(), zone.zoneId())
+        );
+        List<PlaceCandidate> restaurants = candidatesForZone(pool.restaurants(), zone.zoneId()).stream()
+                .filter(item -> budgetAllows(specification, item))
+                .toList();
+        return new AvailableZoneSummary(
+                zone.zoneId(),
+                attractions.size(),
+                (int) attractions.stream().filter(this::isIndoorCandidate).count(),
+                (int) attractions.stream().filter(item -> Boolean.TRUE.equals(item.familyFriendly())).count(),
+                (int) restaurants.stream().filter(item -> item.hasMealType("lunch")).count(),
+                (int) restaurants.stream().filter(item -> item.hasMealType("dinner")).count(),
+                attractions.size() / activitySlotsPerDay(specification),
+                LOCAL_FRESHNESS_STATUS
+        );
+    }
+
+    private List<String> anchorPoiIds(List<PlaceCandidate> attractions) {
+        return attractions.stream()
+                .sorted(Comparator.comparing((PlaceCandidate item) -> item.priority() == null ? 0 : item.priority()).reversed())
+                .map(item -> normalizeToken(item.name()))
+                .filter(value -> !value.isBlank())
+                .limit(3)
+                .toList();
+    }
+
+    private String semanticProfile(PlanningZoneSummary zone) {
+        List<String> tokens = new ArrayList<>();
+        tokens.add(zone.name());
+        tokens.addAll(zone.themes());
+        tokens.addAll(zone.capabilities().categoryCounts().keySet());
+        tokens.addAll(zone.capabilities().styleTagCounts().keySet());
+        return tokens.stream()
+                .filter(value -> !isBlank(value))
+                .map(this::normalizeToken)
+                .distinct()
+                .collect(Collectors.joining(" "));
+    }
+
+    private List<PlaceCandidate> requestScopedAttractions(
+            TripPlanningSpecification specification,
+            List<PlaceCandidate> attractions
+    ) {
+        return attractions.stream()
+                .filter(item -> !requiresFamilyFriendly(specification) || Boolean.TRUE.equals(item.familyFriendly()))
+                .filter(item -> budgetAllows(specification, item))
+                .filter(item -> matchesPreferredStyles(specification, item))
+                .toList();
+    }
+
+    private boolean requiresFamilyFriendly(TripPlanningSpecification specification) {
+        return specification != null
+                && specification.constraints() != null
+                && specification.constraints().familyFriendly();
+    }
+
+    private boolean matchesPreferredStyles(TripPlanningSpecification specification, PlaceCandidate candidate) {
+        List<String> styles = activityFilteringStyles(specification);
+        if (styles.isEmpty()) {
+            return true;
+        }
+        return styles.stream()
+                .map(this::normalizeToken)
+                .filter(value -> !value.isBlank())
+                .anyMatch(style -> candidateHasStyle(candidate, style));
+    }
+
+    private List<String> activityFilteringStyles(TripPlanningSpecification specification) {
+        List<String> styles = specification == null || specification.styles() == null ? List.of() : specification.styles();
+        return styles.stream()
+                .map(this::normalizeToken)
+                .filter(value -> !value.isBlank())
+                .filter(this::isActivityFilteringStyle)
+                .toList();
+    }
+
+    private boolean isActivityFilteringStyle(String style) {
+        return switch (style) {
+            case "culture", "museum", "gallery", "art", "nature", "park", "garden", "outdoor",
+                 "shopping", "market", "market-shopping", "theme-park", "themepark", "indoor", "rainy-day" -> true;
+            default -> false;
+        };
+    }
+
+    private boolean candidateHasStyle(PlaceCandidate candidate, String style) {
+        if (candidate == null) {
+            return false;
+        }
+        String category = normalizeToken(candidate.category());
+        if (category.equals(style) || category.contains(style) || style.contains(category)) {
+            return true;
+        }
+        return candidate.styleTags() != null && candidate.styleTags().stream()
+                .map(this::normalizeToken)
+                .anyMatch(tag -> tag.equals(style) || tag.contains(style) || style.contains(tag));
+    }
+
+    private boolean isIndoorCandidate(PlaceCandidate candidate) {
+        String category = normalizeToken(candidate == null ? null : candidate.category());
+        if (List.of("museum", "gallery", "art-gallery", "shopping", "market", "library").contains(category)) {
+            return true;
+        }
+        return candidate != null && candidate.styleTags() != null && candidate.styleTags().stream()
+                .map(this::normalizeToken)
+                .anyMatch(tag -> List.of("indoor", "rainy-day", "museum", "gallery").contains(tag));
+    }
+
+    private boolean budgetAllows(TripPlanningSpecification specification, PlaceCandidate candidate) {
+        Integer budget = specification == null ? null : specification.budget();
+        if (budget == null || budget <= 0 || candidate == null || isBlank(candidate.budgetLevel())) {
+            return true;
+        }
+        int dailyBudget = budget / Math.max(1, specification.days());
+        String level = normalizeToken(candidate.budgetLevel());
+        if (dailyBudget < 100) {
+            return "low".equals(level) || "free".equals(level);
+        }
+        if (dailyBudget < 180) {
+            return !"high".equals(level) && !"luxury".equals(level);
+        }
+        return true;
     }
 
     private List<String> themes(ZoneCapabilitySummary capabilities) {

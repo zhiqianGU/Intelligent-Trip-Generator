@@ -97,6 +97,25 @@ public record TripPlanningSpecification(
         );
     }
 
+    public TripPlanningSpecification withAgentOutput(PlanningAgentOutput output) {
+        if (output == null) {
+            return this;
+        }
+        return new TripPlanningSpecification(
+                destination,
+                days,
+                budget,
+                party,
+                styles,
+                pace,
+                mainModel,
+                departureDate,
+                output.normalizedConstraints() == null ? constraints : output.normalizedConstraints(),
+                output.specialEvents(),
+                output.dayStrategies()
+        );
+    }
+
     public record Destination(
             String destinationId,
             String city,
