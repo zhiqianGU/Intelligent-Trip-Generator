@@ -15,8 +15,119 @@ public record PlanDraft(
         String title,
         String overview,
         List<DayPlan> daysPlan,
-        String copyPolishStatus
+        String copyPolishStatus,
+        String routeStatus,
+        String planStatus,
+        String planningMode,
+        String catalogStatus,
+        String copyStatus,
+        String enhancementStatus,
+        List<String> warnings,
+        PlanningContextVersion contextVersion,
+        String planVersion,
+        String basePlanVersion
 ) {
+    public PlanDraft {
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
+        contextVersion = contextVersion == null ? PlanningContextVersion.unknown() : contextVersion;
+        planVersion = planVersion == null || planVersion.isBlank()
+                ? PlanningContextVersion.INITIAL_PLAN_VERSION
+                : planVersion;
+        basePlanVersion = basePlanVersion == null ? "" : basePlanVersion;
+    }
+
+    public PlanDraft(
+            String city,
+            String country,
+            int days,
+            String currency,
+            Party party,
+            String pace,
+            String title,
+            String overview,
+            List<DayPlan> daysPlan,
+            String copyPolishStatus
+    ) {
+        this(city, country, days, currency, party, pace, title, overview, daysPlan, copyPolishStatus, "UNKNOWN");
+    }
+
+    public PlanDraft(
+            String city,
+            String country,
+            int days,
+            String currency,
+            Party party,
+            String pace,
+            String title,
+            String overview,
+            List<DayPlan> daysPlan,
+            String copyPolishStatus,
+            String routeStatus
+    ) {
+        this(
+                city,
+                country,
+                days,
+                currency,
+                party,
+                pace,
+                title,
+                overview,
+                daysPlan,
+                copyPolishStatus,
+                routeStatus,
+                "UNKNOWN",
+                "UNKNOWN",
+                "UNKNOWN",
+                normalizeCopyStatus(copyPolishStatus),
+                "UNKNOWN",
+                List.of()
+        );
+    }
+
+    public PlanDraft(
+            String city,
+            String country,
+            int days,
+            String currency,
+            Party party,
+            String pace,
+            String title,
+            String overview,
+            List<DayPlan> daysPlan,
+            String copyPolishStatus,
+            String routeStatus,
+            String planStatus,
+            String planningMode,
+            String catalogStatus,
+            String copyStatus,
+            String enhancementStatus,
+            List<String> warnings
+    ) {
+        this(
+                city,
+                country,
+                days,
+                currency,
+                party,
+                pace,
+                title,
+                overview,
+                daysPlan,
+                copyPolishStatus,
+                routeStatus,
+                planStatus,
+                planningMode,
+                catalogStatus,
+                copyStatus,
+                enhancementStatus,
+                warnings,
+                PlanningContextVersion.unknown(),
+                PlanningContextVersion.INITIAL_PLAN_VERSION,
+                ""
+        );
+    }
+
     public static PlanDraft fromResponse(PlanDraftResponse response) {
         if (response == null) {
             return null;
@@ -33,7 +144,17 @@ public record PlanDraft(
                 response.daysPlan() == null
                         ? List.of()
                         : response.daysPlan().stream().map(DayPlan::fromResponse).toList(),
-                response.copyPolishStatus()
+                response.copyPolishStatus(),
+                response.routeStatus(),
+                response.planStatus(),
+                response.planningMode(),
+                response.catalogStatus(),
+                response.copyStatus(),
+                response.enhancementStatus(),
+                response.warnings(),
+                response.contextVersion(),
+                response.planVersion(),
+                response.basePlanVersion()
         );
     }
 
@@ -48,8 +169,32 @@ public record PlanDraft(
                 title,
                 overview,
                 daysPlan == null ? List.of() : daysPlan.stream().map(DayPlan::toResponse).toList(),
-                copyPolishStatus
+                copyPolishStatus,
+                routeStatus,
+                planStatus,
+                planningMode,
+                catalogStatus,
+                copyStatus,
+                enhancementStatus,
+                warnings,
+                contextVersion,
+                planVersion,
+                basePlanVersion
         );
+    }
+
+    private static String normalizeCopyStatus(String copyPolishStatus) {
+        if (copyPolishStatus == null || copyPolishStatus.isBlank()) {
+            return "BASIC";
+        }
+        String normalized = copyPolishStatus.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("completed".equals(normalized)) {
+            return "COMPLETED";
+        }
+        if ("deferred".equals(normalized) || "pending".equals(normalized)) {
+            return "PENDING";
+        }
+        return "BASIC";
     }
 
     private static Party fromResponseParty(CreatePlanReq.Party party) {

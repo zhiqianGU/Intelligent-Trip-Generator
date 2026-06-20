@@ -690,7 +690,17 @@ public class DuplicatePoiRepairService {
                 draft.title(),
                 draft.overview(),
                 days == null ? List.of() : days,
-                draft.copyPolishStatus()
+                draft.copyPolishStatus(),
+                draft.routeStatus(),
+                draft.planStatus(),
+                draft.planningMode(),
+                draft.catalogStatus(),
+                draft.copyStatus(),
+                draft.enhancementStatus(),
+                draft.warnings(),
+                draft.contextVersion(),
+                draft.planVersion(),
+                draft.basePlanVersion()
         );
     }
 

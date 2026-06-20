@@ -55,7 +55,17 @@ public class CopyPolishService {
                 safeDraft.title(),
                 safeDraft.overview(),
                 safeDraft.daysPlan(),
-                status
+                status,
+                safeDraft.routeStatus(),
+                safeDraft.planStatus(),
+                safeDraft.planningMode(),
+                safeDraft.catalogStatus(),
+                copyStatusFor(status),
+                safeDraft.enhancementStatus(),
+                safeDraft.warnings(),
+                safeDraft.contextVersion(),
+                safeDraft.planVersion(),
+                safeDraft.basePlanVersion()
         );
     }
 
@@ -81,8 +91,32 @@ public class CopyPolishService {
                 base.title(),
                 selectCopy(polished.overview(), base.overview()),
                 mergedDays,
-                base.copyPolishStatus()
+                base.copyPolishStatus(),
+                base.routeStatus(),
+                base.planStatus(),
+                base.planningMode(),
+                base.catalogStatus(),
+                base.copyStatus(),
+                base.enhancementStatus(),
+                base.warnings(),
+                base.contextVersion(),
+                base.planVersion(),
+                base.basePlanVersion()
         );
+    }
+
+    private String copyStatusFor(String status) {
+        if (status == null || status.isBlank()) {
+            return "BASIC";
+        }
+        String normalized = status.trim().toLowerCase(Locale.ROOT);
+        if ("completed".equals(normalized)) {
+            return "COMPLETED";
+        }
+        if ("deferred".equals(normalized) || "pending".equals(normalized)) {
+            return "PENDING";
+        }
+        return "BASIC";
     }
 
     private DayPlan mergeDayCopy(DayPlan base, DayPlan polished) {

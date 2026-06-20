@@ -7,6 +7,8 @@ import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
 import thesis.project.gu.planning.domain.PlaceCandidatePool;
 import thesis.project.gu.planning.domain.PlanDraft;
+import thesis.project.gu.planning.domain.TripSkeleton;
+import thesis.project.gu.planning.domain.TripSlot;
 import thesis.project.gu.planning.domain.TripPlanningSpecification;
 import thesis.project.gu.planning.localfast.LocalPlanGeneratorService;
 
@@ -28,6 +30,17 @@ class LocalPlanGeneratorServiceTest {
         assertThat(draft.days()).isEqualTo(3);
         assertThat(draft.daysPlan()).hasSize(3);
         assertThat(draft.copyPolishStatus()).isEqualTo("local-fast");
+        assertThat(draft.routeStatus()).isEqualTo("ESTIMATED");
+        assertThat(draft.planStatus()).isEqualTo("READY");
+        assertThat(draft.planningMode()).isEqualTo("ZONE_GUIDED_LOCAL_FIRST");
+        assertThat(draft.catalogStatus()).isEqualTo("SUFFICIENT");
+        assertThat(draft.copyStatus()).isEqualTo("BASIC");
+        assertThat(draft.enhancementStatus()).isEqualTo("PENDING");
+        assertThat(draft.contextVersion().catalogVersion()).isEqualTo("local-poi-v1");
+        assertThat(draft.contextVersion().embeddingVersion()).isEqualTo("none");
+        assertThat(draft.planVersion()).isEqualTo("plan-v1");
+        assertThat(draft.basePlanVersion()).isEmpty();
+        assertThat(draft.warnings()).isEmpty();
         assertThat(draft.daysPlan()).allSatisfy(this::hasLunchAndDinner);
     }
 
@@ -101,6 +114,30 @@ class LocalPlanGeneratorServiceTest {
     }
 
     @Test
+    void incompleteSkeletonFallsBackToFullRequestedDayCount() {
+        CreatePlanReq req = req(3, List.of("culture"), "normal", 0);
+        TripPlanningSpecification specification = TripPlanningSpecification.fromRequest(req);
+        PlaceCandidatePool candidatePool = catalogService.buildCandidatePool(specification);
+        TripSkeleton partialSkeleton = new TripSkeleton(List.of(new TripSkeleton.DaySkeleton(
+                1,
+                "Only one explicit day",
+                "brisbane-south-bank",
+                "09:00",
+                List.of(
+                        new TripSlot("day1-activity-1", TripSlot.SlotType.ACTIVITY, "brisbane-south-bank", List.of(), 90, null),
+                        new TripSlot("day1-lunch", TripSlot.SlotType.LUNCH, "brisbane-south-bank", List.of(), 60, null),
+                        new TripSlot("day1-dinner", TripSlot.SlotType.DINNER, "brisbane-south-bank", List.of(), 60, null)
+                )
+        )));
+
+        PlanDraft draft = service.generate(specification, candidatePool, partialSkeleton);
+
+        assertThat(draft.days()).isEqualTo(3);
+        assertThat(draft.daysPlan()).hasSize(3);
+        assertThat(draft.toResponse().daysPlan()).allSatisfy(this::hasLunchAndDinner);
+    }
+
+    @Test
     void normalPlanKeepsLunchInsidePracticalWindow() {
         PlanDraftResponse draft = service.generate(req(5, List.of(), "normal", 0));
 
@@ -110,6 +147,15 @@ class LocalPlanGeneratorServiceTest {
                         .findFirst()
                         .ifPresent(lunch -> assertThat(minutes(lunch.startTime())).isLessThanOrEqualTo(13 * 60 + 30))
         );
+    }
+
+    @Test
+    void localFastStopsExposeEstimatedRouteHints() {
+        PlanDraftResponse draft = service.generate(req(1, List.of("culture"), "normal", 0));
+
+        assertThat(draft.routeStatus()).isEqualTo("ESTIMATED");
+        assertThat(draft.daysPlan().getFirst().stops())
+                .anySatisfy(stop -> assertThat(stop.tip()).contains("Route status: ESTIMATED"));
     }
 
     @Test

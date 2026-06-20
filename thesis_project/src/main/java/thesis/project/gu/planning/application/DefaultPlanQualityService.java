@@ -1,8 +1,12 @@
 package thesis.project.gu.planning.application;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.domain.PlanDraft;
+import thesis.project.gu.planning.domain.TripSkeleton;
+import thesis.project.gu.planning.quality.LocalPlanQualityReport;
+import thesis.project.gu.planning.quality.SkeletonPlanQualityValidator;
 
 import java.util.List;
 import java.util.Map;
@@ -12,15 +16,29 @@ public class DefaultPlanQualityService {
     private final DraftValidationService draftValidationService;
     private final DeterministicPlanRepairService deterministicPlanRepairService;
     private final PostRoutePlanRepairService postRoutePlanRepairService;
+    private final SkeletonPlanQualityValidator skeletonPlanQualityValidator;
 
     public DefaultPlanQualityService(
             DraftValidationService draftValidationService,
             DeterministicPlanRepairService deterministicPlanRepairService,
             PostRoutePlanRepairService postRoutePlanRepairService
     ) {
+        this(draftValidationService, deterministicPlanRepairService, postRoutePlanRepairService, new SkeletonPlanQualityValidator());
+    }
+
+    @Autowired
+    public DefaultPlanQualityService(
+            DraftValidationService draftValidationService,
+            DeterministicPlanRepairService deterministicPlanRepairService,
+            PostRoutePlanRepairService postRoutePlanRepairService,
+            SkeletonPlanQualityValidator skeletonPlanQualityValidator
+    ) {
         this.draftValidationService = draftValidationService;
         this.deterministicPlanRepairService = deterministicPlanRepairService;
         this.postRoutePlanRepairService = postRoutePlanRepairService;
+        this.skeletonPlanQualityValidator = skeletonPlanQualityValidator == null
+                ? new SkeletonPlanQualityValidator()
+                : skeletonPlanQualityValidator;
     }
 
     public List<String> validate(PlanDraft draft) {
@@ -33,6 +51,10 @@ public class DefaultPlanQualityService {
 
     public List<String> validate(PlanDraft draft, CreatePlanReq req, Map<Integer, Integer> effectiveMinByDay) {
         return draftValidationService.validate(draft, req, effectiveMinByDay);
+    }
+
+    public List<LocalPlanQualityReport.Warning> validateSkeleton(PlanDraft draft, TripSkeleton skeleton) {
+        return skeletonPlanQualityValidator.validate(draft, skeleton);
     }
 
     public boolean isDeterministicRepairIssue(String issue) {

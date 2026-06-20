@@ -91,7 +91,17 @@ public class MealTimeWindowRepairService {
                 draft.title(),
                 draft.overview(),
                 updatedDays,
-                draft.copyPolishStatus()
+                draft.copyPolishStatus(),
+                draft.routeStatus(),
+                draft.planStatus(),
+                draft.planningMode(),
+                draft.catalogStatus(),
+                draft.copyStatus(),
+                draft.enhancementStatus(),
+                draft.warnings(),
+                draft.contextVersion(),
+                draft.planVersion(),
+                draft.basePlanVersion()
         );
     }
 

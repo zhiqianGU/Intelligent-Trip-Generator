@@ -52,7 +52,17 @@ public class PlanFinalizationService {
                 draft.title(),
                 draft.overview(),
                 adjustedDays,
-                draft.copyPolishStatus()
+                draft.copyPolishStatus(),
+                draft.routeStatus(),
+                draft.planStatus(),
+                draft.planningMode(),
+                draft.catalogStatus(),
+                draft.copyStatus(),
+                draft.enhancementStatus(),
+                draft.warnings(),
+                draft.contextVersion(),
+                draft.planVersion(),
+                draft.basePlanVersion()
         );
     }
 
@@ -73,7 +83,17 @@ public class PlanFinalizationService {
                 sanitizeNarrativeCopyStrict(draft.title(), finalTitleFallback(draft)),
                 sanitizeNarrativeCopyStrict(draft.overview(), finalOverviewFallback(draft)),
                 days,
-                draft.copyPolishStatus()
+                draft.copyPolishStatus(),
+                draft.routeStatus(),
+                draft.planStatus(),
+                draft.planningMode(),
+                draft.catalogStatus(),
+                draft.copyStatus(),
+                draft.enhancementStatus(),
+                draft.warnings(),
+                draft.contextVersion(),
+                draft.planVersion(),
+                draft.basePlanVersion()
         );
     }
 

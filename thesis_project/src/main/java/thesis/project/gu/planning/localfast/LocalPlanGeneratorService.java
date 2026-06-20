@@ -1,6 +1,7 @@
 package thesis.project.gu.planning.localfast;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import thesis.project.gu.catalog.application.DestinationCatalog;
 import thesis.project.gu.planning.api.dto.CreatePlanReq;
 import thesis.project.gu.planning.api.dto.PlanDraftResponse;
@@ -8,8 +9,11 @@ import thesis.project.gu.planning.application.ItineraryGenerator;
 import thesis.project.gu.planning.domain.PlaceCandidate;
 import thesis.project.gu.planning.domain.PlaceCandidatePool;
 import thesis.project.gu.planning.domain.PlanDraft;
+import thesis.project.gu.planning.domain.PlanningContextVersion;
 import thesis.project.gu.planning.domain.TripSkeleton;
 import thesis.project.gu.planning.domain.TripPlanningSpecification;
+import thesis.project.gu.routing.application.LocalRouteEstimateService;
+import thesis.project.gu.routing.domain.EstimatedRouteSegment;
 
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -31,13 +35,29 @@ public class LocalPlanGeneratorService implements ItineraryGenerator {
     private static final int LUNCH_LATEST_START_MINUTES = 13 * 60 + 30;
     private static final int DINNER_START_MINUTES = 17 * 60 + 30;
     private static final int DINNER_LATEST_START_MINUTES = 20 * 60 + 30;
-    private static final int TRANSFER_MINUTES = 20;
     private static final double MEAL_HARD_DISTANCE_KM = 5.0;
 
     private final DestinationCatalog catalogService;
+    private final SlotFillingScheduler slotFillingScheduler;
+    private final LocalRouteEstimateService localRouteEstimateService;
 
     public LocalPlanGeneratorService(DestinationCatalog catalogService) {
+        this(catalogService, new SlotFillingScheduler(), new LocalRouteEstimateService());
+    }
+
+    public LocalPlanGeneratorService(DestinationCatalog catalogService, SlotFillingScheduler slotFillingScheduler) {
+        this(catalogService, slotFillingScheduler, new LocalRouteEstimateService());
+    }
+
+    @Autowired
+    public LocalPlanGeneratorService(
+            DestinationCatalog catalogService,
+            SlotFillingScheduler slotFillingScheduler,
+            LocalRouteEstimateService localRouteEstimateService
+    ) {
         this.catalogService = catalogService;
+        this.slotFillingScheduler = slotFillingScheduler == null ? new SlotFillingScheduler() : slotFillingScheduler;
+        this.localRouteEstimateService = localRouteEstimateService == null ? new LocalRouteEstimateService() : localRouteEstimateService;
     }
 
     public PlanDraftResponse generate(CreatePlanReq req) {
@@ -67,13 +87,65 @@ public class LocalPlanGeneratorService implements ItineraryGenerator {
 
         int days = Math.max(1, req == null ? 1 : req.days());
         String pace = normalizePace(req == null ? null : req.pace());
-        int nonMealTarget = nonMealStopsPerDay(pace, req == null ? null : req.party());
         PlaceCandidate hotel = chooseHotel(pool.hotels(), req);
-        List<String> areaRotation = areaRotation(pool, nonMealTarget, skeleton);
+        List<PlanDraft.DayPlan> dayPlans = new ArrayList<>();
+        List<SlotFillingScheduler.DaySchedule> slotSchedules = slotFillingScheduler.schedule(req, pool, skeleton);
+        if (slotSchedules.size() == days) {
+            for (SlotFillingScheduler.DaySchedule schedule : slotSchedules) {
+                List<PlanDraft.Place> stops = scheduleDayStops(schedule.attractions(), schedule.lunch(), schedule.dinner(), schedule.day());
+                String anchorArea = schedule.anchorArea();
+                dayPlans.add(new PlanDraft.DayPlan(
+                        schedule.day(),
+                        toHotelPlace(hotel),
+                        stops,
+                        dayTheme(schedule.day(), anchorArea, schedule.attractions()),
+                        morningNote(schedule.attractions()),
+                        afternoonNote(schedule.attractions()),
+                        eveningNote(schedule.dinner()),
+                        dayNote(schedule.day(), anchorArea, schedule.attractions())
+                ));
+            }
+        } else {
+            dayPlans.addAll(generateAreaAwareFallbackDays(req, pool, skeleton, hotel, days, pace));
+        }
+
+        return new PlanDraft(
+                pool.city(),
+                pool.country(),
+                days,
+                pool.currency(),
+                toPlanDraftParty(req == null ? new CreatePlanReq.Party(2, 0) : req.party()),
+                pace,
+                pool.city() + " " + days + "-Day Local Fast Itinerary",
+                "A fast local itinerary generated from curated local POI data with area-aware daily routing.",
+                dayPlans,
+                "local-fast",
+                "ESTIMATED",
+                "READY",
+                "ZONE_GUIDED_LOCAL_FIRST",
+                "SUFFICIENT",
+                "BASIC",
+                "PENDING",
+                List.of(),
+                PlanningContextVersion.localFirst(),
+                PlanningContextVersion.INITIAL_PLAN_VERSION,
+                ""
+        );
+    }
+
+    private List<PlanDraft.DayPlan> generateAreaAwareFallbackDays(
+            CreatePlanReq req,
+            PlaceCandidatePool pool,
+            TripSkeleton skeleton,
+            PlaceCandidate hotel,
+            int days,
+            String pace
+    ) {
         Set<String> usedAttractions = new HashSet<>();
         Set<String> usedRestaurants = new HashSet<>();
         List<PlanDraft.DayPlan> dayPlans = new ArrayList<>();
-
+        int nonMealTarget = nonMealStopsPerDay(pace, req == null ? null : req.party());
+        List<String> areaRotation = areaRotation(pool, nonMealTarget, skeleton);
         for (int dayIndex = 1; dayIndex <= days; dayIndex++) {
             String anchorArea = areaRotation.get((dayIndex - 1) % areaRotation.size());
             List<PlaceCandidate> attractions = selectAttractionsForDay(
@@ -103,19 +175,7 @@ public class LocalPlanGeneratorService implements ItineraryGenerator {
                     dayNote(dayIndex, anchorArea, attractions)
             ));
         }
-
-        return new PlanDraft(
-                pool.city(),
-                pool.country(),
-                days,
-                pool.currency(),
-                toPlanDraftParty(req == null ? new CreatePlanReq.Party(2, 0) : req.party()),
-                pace,
-                pool.city() + " " + days + "-Day Local Fast Itinerary",
-                "A fast local itinerary generated from curated local POI data with area-aware daily routing.",
-                dayPlans,
-                "local-fast"
-        );
+        return dayPlans;
     }
 
     private List<PlaceCandidate> selectAttractionsForDay(
@@ -277,29 +337,33 @@ public class LocalPlanGeneratorService implements ItineraryGenerator {
                 continue;
             }
             if (!lunchInserted && shouldInsertLunchBeforeNextStop(current, previous, attraction, lunch, stay)) {
-                current += transferMinutes(previous, lunch);
+                EstimatedRouteSegment lunchTransfer = estimateTransfer(previous, lunch);
+                current += transferMinutes(lunchTransfer);
                 current = Math.max(current, LUNCH_START_MINUTES);
-                stops.add(toMealPlace(lunch, "lunch", current, dayIndex));
+                stops.add(toMealPlace(lunch, "lunch", current, dayIndex, lunchTransfer));
                 current += stayMinutes(lunch);
                 previous = lunch;
                 lunchInserted = true;
             }
-            current += transferMinutes(previous, attraction);
-            stops.add(toAttractionPlace(attraction, lunchInserted ? "afternoon" : "morning", current, stay, dayIndex));
+            EstimatedRouteSegment attractionTransfer = estimateTransfer(previous, attraction);
+            current += transferMinutes(attractionTransfer);
+            stops.add(toAttractionPlace(attraction, lunchInserted ? "afternoon" : "morning", current, stay, dayIndex, attractionTransfer));
             current += stay;
             previous = attraction;
             scheduledAttractions++;
         }
         if (!lunchInserted) {
-            current += transferMinutes(previous, lunch);
+            EstimatedRouteSegment lunchTransfer = estimateTransfer(previous, lunch);
+            current += transferMinutes(lunchTransfer);
             current = Math.max(current, LUNCH_START_MINUTES);
-            stops.add(toMealPlace(lunch, "lunch", current, dayIndex));
+            stops.add(toMealPlace(lunch, "lunch", current, dayIndex, lunchTransfer));
             current += stayMinutes(lunch);
             previous = lunch;
         }
-        current += transferMinutes(previous, dinner);
+        EstimatedRouteSegment dinnerTransfer = estimateTransfer(previous, dinner);
+        current += transferMinutes(dinnerTransfer);
         current = Math.max(current, DINNER_START_MINUTES);
-        stops.add(toMealPlace(dinner, "dinner", current, dayIndex));
+        stops.add(toMealPlace(dinner, "dinner", current, dayIndex, dinnerTransfer));
         return stops;
     }
 
@@ -341,19 +405,32 @@ public class LocalPlanGeneratorService implements ItineraryGenerator {
                 "Confirm current rates and availability before booking.");
     }
 
-    private PlanDraft.Place toAttractionPlace(PlaceCandidate item, String slot, int start, int stay, int dayIndex) {
+    private PlanDraft.Place toAttractionPlace(
+            PlaceCandidate item,
+            String slot,
+            int start,
+            int stay,
+            int dayIndex,
+            EstimatedRouteSegment transfer
+    ) {
         int safeStart = safeStartForStay(start, stay);
         return toPlace(item, normalizeCategory(item.category()), slot, formatMinutes(safeStart), formatMinutes(safeStart + stay), stay,
                 item.name() + " anchors Day " + dayIndex + " around " + item.area() + " with a verified local stop.",
-                "Keep the visit flexible around weather and daily pace.");
+                appendRouteEstimate("Keep the visit flexible around weather and daily pace.", transfer));
     }
 
-    private PlanDraft.Place toMealPlace(PlaceCandidate item, String mealType, int start, int dayIndex) {
+    private PlanDraft.Place toMealPlace(
+            PlaceCandidate item,
+            String mealType,
+            int start,
+            int dayIndex,
+            EstimatedRouteSegment transfer
+    ) {
         int stay = stayMinutes(item);
         int safeStart = safeStartForStay(start, stay);
         return toPlace(item, "restaurant", mealType, formatMinutes(safeStart), formatMinutes(safeStart + stay), stay,
                 item.name() + " provides a practical " + mealType + " break for Day " + dayIndex + " near " + item.area() + ".",
-                "Keep the meal timing flexible around the surrounding stops.");
+                appendRouteEstimate("Keep the meal timing flexible around the surrounding stops.", transfer));
     }
 
     private PlanDraft.Place toPlace(
@@ -633,24 +710,27 @@ public class LocalPlanGeneratorService implements ItineraryGenerator {
     }
 
     private int transferMinutes(PlaceCandidate from, PlaceCandidate to) {
-        if (from == null || to == null || from.latitude() == null || from.longitude() == null
-                || to.latitude() == null || to.longitude() == null) {
-            return 0;
+        return transferMinutes(estimateTransfer(from, to));
+    }
+
+    private EstimatedRouteSegment estimateTransfer(PlaceCandidate from, PlaceCandidate to) {
+        return localRouteEstimateService.estimate(from, to);
+    }
+
+    private int transferMinutes(EstimatedRouteSegment segment) {
+        return segment == null || segment.durationMinutes() == null ? 0 : Math.max(0, segment.durationMinutes());
+    }
+
+    private String appendRouteEstimate(String tip, EstimatedRouteSegment segment) {
+        if (segment == null || segment.durationMinutes() == null || segment.durationMinutes() <= 0) {
+            return tip;
         }
-        double km = distanceKm(from.latitude(), from.longitude(), to.latitude(), to.longitude());
-        if (km <= 2.0) {
-            return TRANSFER_MINUTES;
-        }
-        if (km <= 5.0) {
-            return 35;
-        }
-        if (km <= 8.0) {
-            return 45;
-        }
-        if (km <= 12.0) {
-            return 75;
-        }
-        return 90;
+        String distance = segment.distanceMeters() == null
+                ? ""
+                : ", about " + Math.max(1, (int) Math.round(segment.distanceMeters() / 1000.0)) + " km";
+        return tip + " Route status: " + segment.routeStatus()
+                + ", estimated " + segment.durationMinutes() + " min"
+                + distance + " by " + segment.mode() + ".";
     }
 
     private double distanceKm(double leftLatitude, double leftLongitude, double rightLatitude, double rightLongitude) {

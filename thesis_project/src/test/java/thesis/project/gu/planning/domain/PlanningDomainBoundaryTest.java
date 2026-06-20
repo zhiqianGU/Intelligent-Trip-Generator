@@ -118,7 +118,24 @@ class PlanningDomainBoundaryTest {
                         "Evening",
                         "Note"
                 )),
-                "local-fast"
+                "local-fast",
+                "ESTIMATED",
+                "READY",
+                "ZONE_GUIDED_LOCAL_FIRST",
+                "SUFFICIENT",
+                "BASIC",
+                "PENDING",
+                List.of("coverage-soft-gap:day1:ACTIVITY:missing=1"),
+                new PlanningContextVersion(
+                        "catalog-v2",
+                        "zone-v3",
+                        "semantic-v1",
+                        "embedding-v0",
+                        "prompt-v4",
+                        "spec-v5"
+                ),
+                "plan-v7",
+                "plan-v6"
         );
 
         PlanDraft draft = PlanDraft.fromResponse(response);
@@ -126,10 +143,41 @@ class PlanningDomainBoundaryTest {
 
         assertThat(draft.city()).isEqualTo("Brisbane");
         assertThat(draft.party()).isEqualTo(new PlanDraft.Party(2, 0));
+        assertThat(draft.routeStatus()).isEqualTo("ESTIMATED");
+        assertThat(draft.planStatus()).isEqualTo("READY");
+        assertThat(draft.planningMode()).isEqualTo("ZONE_GUIDED_LOCAL_FIRST");
+        assertThat(draft.catalogStatus()).isEqualTo("SUFFICIENT");
+        assertThat(draft.copyStatus()).isEqualTo("BASIC");
+        assertThat(draft.enhancementStatus()).isEqualTo("PENDING");
+        assertThat(draft.warnings()).containsExactly("coverage-soft-gap:day1:ACTIVITY:missing=1");
+        assertThat(draft.contextVersion().catalogVersion()).isEqualTo("catalog-v2");
+        assertThat(draft.contextVersion().zoneSnapshotVersion()).isEqualTo("zone-v3");
+        assertThat(draft.planVersion()).isEqualTo("plan-v7");
+        assertThat(draft.basePlanVersion()).isEqualTo("plan-v6");
         assertThat(draft.daysPlan()).hasSize(1);
         assertThat(draft.daysPlan().getFirst().stops().getFirst())
                 .isInstanceOf(PlanDraft.Place.class);
         assertThat(roundTrip).isEqualTo(response);
+    }
+
+    @Test
+    void legacyPlanDraftResponseConstructorDoesNotPretendToUseLocalFirstContext() {
+        PlanDraftResponse response = new PlanDraftResponse(
+                "Sydney",
+                "Australia",
+                1,
+                "AUD",
+                new CreatePlanReq.Party(2, 0),
+                "normal",
+                "Title",
+                "Overview",
+                List.of(),
+                null
+        );
+
+        assertThat(response.contextVersion().catalogVersion()).isEqualTo("unknown");
+        assertThat(response.contextVersion().zoneSnapshotVersion()).isEqualTo("unknown");
+        assertThat(response.contextVersion().embeddingVersion()).isEqualTo("unknown");
     }
 
     private LocalPoiItem item(String name, String type) {

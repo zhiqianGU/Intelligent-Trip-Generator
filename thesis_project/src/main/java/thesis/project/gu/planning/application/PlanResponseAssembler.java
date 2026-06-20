@@ -66,8 +66,32 @@ public class PlanResponseAssembler {
                 title,
                 overview,
                 days,
-                copyPolishStatus
+                copyPolishStatus,
+                draft.routeStatus(),
+                draft.planStatus(),
+                draft.planningMode(),
+                draft.catalogStatus(),
+                copyStatusFor(copyPolishStatus, draft.copyStatus()),
+                draft.enhancementStatus(),
+                draft.warnings(),
+                draft.contextVersion(),
+                draft.planVersion(),
+                draft.basePlanVersion()
         );
+    }
+
+    private String copyStatusFor(String copyPolishStatus, String fallback) {
+        if (copyPolishStatus == null || copyPolishStatus.isBlank()) {
+            return fallback == null || fallback.isBlank() ? "BASIC" : fallback;
+        }
+        String normalized = copyPolishStatus.trim().toLowerCase(java.util.Locale.ROOT);
+        if ("completed".equals(normalized)) {
+            return "COMPLETED";
+        }
+        if ("deferred".equals(normalized) || "pending".equals(normalized)) {
+            return "PENDING";
+        }
+        return fallback == null || fallback.isBlank() ? "BASIC" : fallback;
     }
 
     public CreatePlanReq withPace(CreatePlanReq req, String pace) {

@@ -2664,7 +2664,17 @@ public class PlanProcessorService {
                 draft.title(),
                 draft.overview(),
                 repairedDays,
-                draft.copyPolishStatus()
+                draft.copyPolishStatus(),
+                draft.routeStatus(),
+                draft.planStatus(),
+                draft.planningMode(),
+                draft.catalogStatus(),
+                draft.copyStatus(),
+                draft.enhancementStatus(),
+                draft.warnings(),
+                draft.contextVersion(),
+                draft.planVersion(),
+                draft.basePlanVersion()
         );
     }
 

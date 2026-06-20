@@ -2,7 +2,11 @@ package thesis.project.gu.planning.domain;
 
 import thesis.project.gu.catalog.local.LocalPoiCatalog;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 public record PlaceCandidatePool(
         String city,
@@ -48,6 +52,34 @@ public record PlaceCandidatePool(
         return safeSize(hotels) + safeSize(attractions) + safeSize(restaurants);
     }
 
+    public PlaceCandidatePool withAdditionalCandidates(List<PlaceCandidate> candidates) {
+        if (candidates == null || candidates.isEmpty()) {
+            return this;
+        }
+        List<PlaceCandidate> addedHotels = new ArrayList<>();
+        List<PlaceCandidate> addedAttractions = new ArrayList<>();
+        List<PlaceCandidate> addedRestaurants = new ArrayList<>();
+        for (PlaceCandidate candidate : candidates) {
+            if (candidate == null || candidate.type() == null || isBlank(candidate.name())) {
+                continue;
+            }
+            switch (candidate.type()) {
+                case HOTEL -> addedHotels.add(candidate);
+                case ATTRACTION -> addedAttractions.add(candidate);
+                case RESTAURANT -> addedRestaurants.add(candidate);
+            }
+        }
+        return new PlaceCandidatePool(
+                city,
+                country,
+                state,
+                currency,
+                mergeDeduped(hotels, addedHotels),
+                mergeDeduped(attractions, addedAttractions),
+                mergeDeduped(restaurants, addedRestaurants)
+        );
+    }
+
     private static List<PlaceCandidate> toCandidates(List<thesis.project.gu.catalog.local.LocalPoiItem> items, PlaceCandidateType fallbackType) {
         return items == null ? List.of() : items.stream()
                 .map(item -> PlaceCandidate.fromLocalPoiItem(item, fallbackType))
@@ -56,5 +88,35 @@ public record PlaceCandidatePool(
 
     private static int safeSize(List<?> values) {
         return values == null ? 0 : values.size();
+    }
+
+    private static List<PlaceCandidate> mergeDeduped(List<PlaceCandidate> existing, List<PlaceCandidate> added) {
+        Map<String, PlaceCandidate> merged = new LinkedHashMap<>();
+        if (existing != null) {
+            existing.stream()
+                    .filter(candidate -> candidate != null && !isBlank(candidate.name()))
+                    .forEach(candidate -> merged.putIfAbsent(dedupeKey(candidate), candidate));
+        }
+        if (added != null) {
+            added.stream()
+                    .filter(candidate -> candidate != null && !isBlank(candidate.name()))
+                    .forEach(candidate -> merged.putIfAbsent(dedupeKey(candidate), candidate));
+        }
+        return List.copyOf(merged.values());
+    }
+
+    private static String dedupeKey(PlaceCandidate candidate) {
+        return normalize(candidate.type() == null ? null : candidate.type().name())
+                + "|" + normalize(candidate.name())
+                + "|" + normalize(candidate.area())
+                + "|" + normalize(candidate.addressLine());
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }

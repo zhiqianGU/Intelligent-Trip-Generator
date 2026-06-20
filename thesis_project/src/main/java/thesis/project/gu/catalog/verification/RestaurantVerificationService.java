@@ -154,7 +154,17 @@ public class RestaurantVerificationService {
                 draft.title(),
                 draft.overview(),
                 normalizedDays,
-                draft.copyPolishStatus()
+                draft.copyPolishStatus(),
+                draft.routeStatus(),
+                draft.planStatus(),
+                draft.planningMode(),
+                draft.catalogStatus(),
+                draft.copyStatus(),
+                draft.enhancementStatus(),
+                draft.warnings(),
+                draft.contextVersion(),
+                draft.planVersion(),
+                draft.basePlanVersion()
         ), issues);
     }
 
@@ -250,7 +260,17 @@ public class RestaurantVerificationService {
                 draft.title(),
                 draft.overview(),
                 updatedDays,
-                draft.copyPolishStatus()
+                draft.copyPolishStatus(),
+                draft.routeStatus(),
+                draft.planStatus(),
+                draft.planningMode(),
+                draft.catalogStatus(),
+                draft.copyStatus(),
+                draft.enhancementStatus(),
+                draft.warnings(),
+                draft.contextVersion(),
+                draft.planVersion(),
+                draft.basePlanVersion()
         );
     }
 
